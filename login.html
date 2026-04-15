@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Accesso — Scuola di Danza</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0f;
+    --surface: #141416;
+    --border: rgba(255,255,255,0.07);
+    --border-hover: rgba(255,255,255,0.14);
+    --text: #f0ede8;
+    --text-muted: #666;
+    --accent: #c9a96e;
+    --accent-dim: rgba(201,169,110,0.12);
+    --red: #e05555;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  /* Subtle background pattern */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle at 20% 80%, rgba(201,169,110,0.04) 0%, transparent 50%),
+                      radial-gradient(circle at 80% 20%, rgba(201,169,110,0.03) 0%, transparent 50%);
+    pointer-events: none;
+  }
+  .login-wrap {
+    width: 360px;
+    max-width: 90vw;
+    animation: fadeUp 0.6s cubic-bezier(0.4,0,0.2,1) both;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .login-logo {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  .login-logo img {
+    width: 100px;
+    height: auto;
+    opacity: 0.92;
+  }
+  .login-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-align: center;
+    margin-top: 14px;
+  }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .form-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .form-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 16px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .form-input:focus { border-color: var(--border-hover); }
+  .form-input::placeholder { color: #333; }
+  .btn-login {
+    width: 100%;
+    padding: 13px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(201,169,110,0.25);
+    border-radius: 10px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-login:hover {
+    background: rgba(201,169,110,0.2);
+    border-color: rgba(201,169,110,0.4);
+  }
+  .login-error {
+    font-size: 12px;
+    color: var(--red);
+    text-align: center;
+    min-height: 16px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .login-error.show { opacity: 1; }
+  .divider {
+    height: 1px;
+    background: var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-logo">
+    <img src="Logo_6.png" alt="Logo Scuola di Danza">
+    <div class="login-title">Area riservata</div>
+  </div>
+  <div class="login-box">
+    <div>
+      <label class="form-label" for="pwd">Password</label>
+      <input class="form-input" type="password" id="pwd" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <div class="divider"></div>
+    <button class="btn-login" id="btnLogin">Accedi</button>
+    <div class="login-error" id="errMsg">Password errata. Riprova.</div>
+  </div>
+</div>
+<script>
+  // SHA-256 della password esistente (invariata)
+  const PASSWORD_HASH = '8891cf0b687870411e7521293c0d63f0ce43d7ef523b5bd57c02733bc0c7d111';
+
+  async function sha256(msg) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+
+  if (sessionStorage.getItem('danza_auth') === '1') window.location.replace('app.html');
+
+  async function tryLogin() {
+    const val = document.getElementById('pwd').value;
+    const hash = await sha256(val);
+    if (hash === PASSWORD_HASH) {
+      sessionStorage.setItem('danza_auth', '1');
+      window.location.replace('app.html');
+    } else {
+      document.getElementById('errMsg').classList.add('show');
+      document.getElementById('pwd').value = '';
+      document.getElementById('pwd').focus();
+    }
+  }
+
+  document.getElementById('btnLogin').addEventListener('click', tryLogin);
+  document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+  document.getElementById('pwd').addEventListener('input', () => document.getElementById('errMsg').classList.remove('show'));
+</script>
+</body>
+</html>
