@@ -9,7 +9,7 @@
 
 // ── CONFIGURAZIONE ───────────────────────────────────────
 // Sostituisci con l'URL del tuo Google Apps Script deployato
-const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzIdSBkSIwnAz_PytrLHdgOMRPjNt7Iqz75dTK-m57AyvRdtuumdxlq8DxykCR9uTCGHg/exec';
 
 // Nomi dei fogli
 const SHEET_SPESE     = 'Entrate/Uscite';
