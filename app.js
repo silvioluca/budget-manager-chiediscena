@@ -30,13 +30,15 @@ let tabelleData   = [];
 
 let currentType   = 'Uscite';
 let currentCat    = '';
+let currentPag    = '';
 let editRowIndex  = null; // indice 1-based nel foglio
 
-let chartDash     = null;
-let chartCatDash  = null;
-let chartAnnuale  = null;
+let chartDash      = null;
+let chartCatDash   = null;
+let chartAnnuale   = null;
 let chartAnnualeCat= null;
-let chartGenerale = null;
+let chartGeneraleArea = null;
+let chartWaterfall = null;
 
 // ── UTILITY ──────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat('it-IT', {style:'currency', currency:'EUR'}).format(n);
@@ -269,11 +271,11 @@ function renderChartCatDash() {
 }
 
 // ── INSERIMENTO SPESA ─────────────────────────────────────
+const PAG_OPTIONS = ['Contanti','Bonifico','Carta','PayPal','Satispay','Altro'];
+
 function initInserimento() {
-  // Data default oggi
   $('fData').valueAsDate = new Date();
 
-  // Tipo toggle
   $('typeToggle').querySelectorAll('.type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       $('typeToggle').querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
@@ -285,6 +287,7 @@ function initInserimento() {
   });
 
   renderCatGrid();
+  renderPagGrid();
   $('btnReset').addEventListener('click', resetForm);
   $('btnSubmit').addEventListener('click', submitSpesa);
 }
@@ -305,16 +308,31 @@ function renderCatGrid(forType) {
   });
 }
 
+function renderPagGrid() {
+  const grid = $('pagGrid');
+  grid.innerHTML = PAG_OPTIONS.map(p =>
+    `<button class="cat-chip${currentPag===p?' active':''}" data-pag="${p}">${p}</button>`
+  ).join('');
+  grid.querySelectorAll('.cat-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      currentPag = chip.dataset.pag;
+      grid.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
+}
+
 function resetForm() {
   $('fData').valueAsDate = new Date();
   $('fCosto').value = '';
   $('fDescrizione').value = '';
-  $('fPagamento').value = '';
   currentCat = '';
+  currentPag = '';
   currentType = 'Uscite';
   $('typeToggle').querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
   $('typeToggle').querySelector('[data-type="Uscite"]').classList.add('active');
   renderCatGrid();
+  renderPagGrid();
   showFeedback('');
 }
 
@@ -322,7 +340,6 @@ async function submitSpesa() {
   const data       = $('fData').value;
   const costo      = parseFloat($('fCosto').value);
   const descrizione= $('fDescrizione').value.trim();
-  const pagamento  = $('fPagamento').value;
 
   if (!data)        return showFeedback('Inserisci la data.', true);
   if (!costo || costo <= 0) return showFeedback('Inserisci un importo valido.', true);
@@ -332,17 +349,16 @@ async function submitSpesa() {
   $('btnSubmit').disabled = true;
   showFeedback('Salvataggio…');
 
-  const row = [data, costo, descrizione, currentCat, currentType, pagamento];
+  const row = [data, costo, descrizione, currentCat, currentType, currentPag];
   const res = await apiPost({ action: 'append', sheet: SHEET_SPESE, row });
 
   $('btnSubmit').disabled = false;
   if (res.ok !== false) {
     showFeedback('✓ Salvato correttamente!');
-    // Aggiorna cache locale
     speseData.push({
       _idx: speseData.length + 2,
       data: new Date(data),
-      costo, descrizione, categoria: currentCat, tipo: currentType, pagamento
+      costo, descrizione, categoria: currentCat, tipo: currentType, pagamento: currentPag
     });
     resetForm();
   } else {
@@ -438,6 +454,40 @@ function applyFilters() {
   `).join('');
 }
 
+function exportCsv() {
+  const anno = $('fAnno').value;
+  const mese = $('fMese').value;
+  const tipo = $('fTipo').value;
+  const cat  = $('fCategoria').value;
+
+  let filtered = speseData.filter(r => {
+    if (anno && r.data?.getFullYear() != anno) return false;
+    if (mese && r.data?.getMonth()+1 != mese)  return false;
+    if (tipo && r.tipo !== tipo)               return false;
+    if (cat  && r.categoria !== cat)           return false;
+    return true;
+  }).sort((a,b) => (b.data||0) - (a.data||0));
+
+  const header = ['Data','Importo','Descrizione','Categoria','Tipo','Pagamento'];
+  const rows = filtered.map(r => [
+    r.data ? r.data.toISOString().split('T')[0] : '',
+    r.costo,
+    `"${(r.descrizione||'').replace(/"/g,'""')}"`,
+    `"${(r.categoria||'').replace(/"/g,'""')}"`,
+    r.tipo,
+    r.pagamento
+  ]);
+
+  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `spese_${anno||'tutte'}_${mese||'tutti_mesi'}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function initElencoFilters() {
   ['fAnno','fMese','fTipo','fCategoria'].forEach(id => {
     $(id)?.addEventListener('change', applyFilters);
@@ -446,6 +496,7 @@ function initElencoFilters() {
     ['fAnno','fMese','fTipo','fCategoria'].forEach(id => { if($(id)) $(id).value=''; });
     applyFilters();
   });
+  $('btnExportCsv')?.addEventListener('click', exportCsv);
   $('btnReload')?.addEventListener('click', async () => {
     $('tableLoading').style.display=''; $('speseTable').style.display='none'; $('tableEmpty').style.display='none';
     await loadSpese();
@@ -506,13 +557,16 @@ function renderAnnuale() {
   const cur  = sel.value || String(anni[0] || new Date().getFullYear());
   sel.innerHTML = anni.map(a=>`<option value="${a}">${a}</option>`).join('');
   sel.value = cur;
-  updateAnnuale(parseInt(cur));
+  updateAnnuale(parseInt(cur), parseInt($('meseRiep').value)||null);
 
-  sel.onchange = () => updateAnnuale(parseInt(sel.value));
+  sel.onchange = () => updateAnnuale(parseInt(sel.value), parseInt($('meseRiep').value)||null);
+  $('meseRiep').onchange = () => updateAnnuale(parseInt($('annoRiep').value), parseInt($('meseRiep').value)||null);
 }
 
-function updateAnnuale(anno) {
-  const rows    = speseData.filter(r => r.data?.getFullYear() === anno);
+function updateAnnuale(anno, mese) {
+  let rows = speseData.filter(r => r.data?.getFullYear() === anno);
+  if (mese) rows = rows.filter(r => r.data?.getMonth()+1 === mese);
+
   const entrate = rows.filter(r=>r.tipo==='Entrate').reduce((s,r)=>s+r.costo,0);
   const uscite  = rows.filter(r=>r.tipo==='Uscite').reduce((s,r)=>s+r.costo,0);
 
@@ -522,11 +576,19 @@ function updateAnnuale(anno) {
   $('rSaldo').className     = 'kpi-value ' + (entrate-uscite>=0?'kpi-green':'kpi-red');
   $('rCount').textContent   = rows.length;
 
-  // Grafico mensile
-  const mesi = Array.from({length:12},(_,i)=>i);
-  const ent  = mesi.map(m=>rows.filter(r=>r.tipo==='Entrate'&&r.data?.getMonth()===m).reduce((s,r)=>s+r.costo,0));
-  const usc  = mesi.map(m=>rows.filter(r=>r.tipo==='Uscite' &&r.data?.getMonth()===m).reduce((s,r)=>s+r.costo,0));
-  const labels=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  // Grafico: se mese selezionato → settimanale, altrimenti mensile
+  let labels, ent, usc;
+  if (mese) {
+    // Raggruppa per giorno del mese
+    const daysInMonth = new Date(anno, mese, 0).getDate();
+    labels = Array.from({length: daysInMonth}, (_,i) => String(i+1));
+    ent = labels.map((_,i) => rows.filter(r=>r.tipo==='Entrate'&&r.data?.getDate()===i+1).reduce((s,r)=>s+r.costo,0));
+    usc = labels.map((_,i) => rows.filter(r=>r.tipo==='Uscite' &&r.data?.getDate()===i+1).reduce((s,r)=>s+r.costo,0));
+  } else {
+    labels = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+    ent = Array.from({length:12},(_,m)=>rows.filter(r=>r.tipo==='Entrate'&&r.data?.getMonth()===m).reduce((s,r)=>s+r.costo,0));
+    usc = Array.from({length:12},(_,m)=>rows.filter(r=>r.tipo==='Uscite' &&r.data?.getMonth()===m).reduce((s,r)=>s+r.costo,0));
+  }
 
   if (chartAnnuale) chartAnnuale.destroy();
   chartAnnuale = new Chart($('chartAnnuale'), {
@@ -541,30 +603,43 @@ function updateAnnuale(anno) {
     options: chartOpts()
   });
 
-  // Categorie
-  const cats = {};
-  rows.filter(r=>r.tipo==='Uscite').forEach(r=>{ cats[r.categoria]=(cats[r.categoria]||0)+r.costo; });
-  const sorted = Object.entries(cats).sort((a,b)=>b[1]-a[1]);
+  // Donut categorie uscite
+  const catsUsc = {};
+  rows.filter(r=>r.tipo==='Uscite').forEach(r=>{ catsUsc[r.categoria]=(catsUsc[r.categoria]||0)+r.costo; });
+  const sortedUsc = Object.entries(catsUsc).sort((a,b)=>b[1]-a[1]);
 
   if (chartAnnualeCat) chartAnnualeCat.destroy();
   chartAnnualeCat = new Chart($('chartAnnualeCat'), {
     type: 'doughnut',
     data: {
-      labels: sorted.map(e=>e[0]),
-      datasets: [{ data:sorted.map(e=>e[1]), backgroundColor:donutColors(), borderWidth:0, hoverOffset:6 }]
+      labels: sortedUsc.map(e=>e[0]),
+      datasets: [{ data:sortedUsc.map(e=>e[1]), backgroundColor:donutColors(), borderWidth:0, hoverOffset:6 }]
     },
     options: donutOpts()
   });
 
-  // Breakdown testo
-  const total = sorted.reduce((s,e)=>s+e[1],0);
-  $('catBreakdown').innerHTML = sorted.map(([cat,val]) => `
+  // Breakdown uscite
+  const totalUsc = sortedUsc.reduce((s,e)=>s+e[1],0);
+  $('catBreakdown').innerHTML = sortedUsc.length ? sortedUsc.map(([cat,val]) => `
     <div class="cat-breakdown-row">
       <span class="cat-breakdown-name">${escHtml(cat)}</span>
-      <div class="cat-breakdown-bar-wrap"><div class="cat-breakdown-bar" style="width:${total?val/total*100:0}%"></div></div>
+      <div class="cat-breakdown-bar-wrap"><div class="cat-breakdown-bar" style="width:${totalUsc?val/totalUsc*100:0}%"></div></div>
       <span class="cat-breakdown-val">${fmt(val)}</span>
     </div>
-  `).join('');
+  `).join('') : '<p style="color:var(--text-dim);padding:12px 0;font-size:13px;">Nessuna uscita nel periodo.</p>';
+
+  // Breakdown entrate
+  const catsEnt = {};
+  rows.filter(r=>r.tipo==='Entrate').forEach(r=>{ catsEnt[r.categoria]=(catsEnt[r.categoria]||0)+r.costo; });
+  const sortedEnt = Object.entries(catsEnt).sort((a,b)=>b[1]-a[1]);
+  const totalEnt = sortedEnt.reduce((s,e)=>s+e[1],0);
+  $('catBreakdownEntrate').innerHTML = sortedEnt.length ? sortedEnt.map(([cat,val]) => `
+    <div class="cat-breakdown-row">
+      <span class="cat-breakdown-name">${escHtml(cat)}</span>
+      <div class="cat-breakdown-bar-wrap"><div class="cat-breakdown-bar" style="background:var(--green);width:${totalEnt?val/totalEnt*100:0}%"></div></div>
+      <span class="cat-breakdown-val" style="color:var(--green)">${fmt(val)}</span>
+    </div>
+  `).join('') : '<p style="color:var(--text-dim);padding:12px 0;font-size:13px;">Nessuna entrata nel periodo.</p>';
 }
 
 // ── RIEPILOGO GENERALE ────────────────────────────────────
@@ -572,20 +647,156 @@ function renderGenerale() {
   const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort();
   const ent  = anni.map(a=>speseData.filter(r=>r.tipo==='Entrate'&&r.data?.getFullYear()===a).reduce((s,r)=>s+r.costo,0));
   const usc  = anni.map(a=>speseData.filter(r=>r.tipo==='Uscite' &&r.data?.getFullYear()===a).reduce((s,r)=>s+r.costo,0));
+  const saldo= ent.map((e,i)=>e-usc[i]);
 
-  if (chartGenerale) chartGenerale.destroy();
-  chartGenerale = new Chart($('chartGenerale'), {
-    type: 'bar',
+  // ── Grafico area/linea ──
+  if (chartGeneraleArea) chartGeneraleArea.destroy();
+  chartGeneraleArea = new Chart($('chartGeneraleArea'), {
+    type: 'line',
     data: {
       labels: anni,
       datasets: [
-        { label:'Entrate', data:ent, backgroundColor:'rgba(92,184,92,0.5)', borderColor:'#5cb85c', borderWidth:1, borderRadius:4 },
-        { label:'Uscite',  data:usc, backgroundColor:'rgba(224,85,85,0.5)', borderColor:'#e05555', borderWidth:1, borderRadius:4 }
+        {
+          label: 'Entrate',
+          data: ent,
+          borderColor: '#5cb85c',
+          backgroundColor: 'rgba(92,184,92,0.10)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: 5,
+          pointBackgroundColor: '#5cb85c',
+          pointBorderColor: '#0d0d0f',
+          pointBorderWidth: 2,
+          borderWidth: 2,
+        },
+        {
+          label: 'Uscite',
+          data: usc,
+          borderColor: '#e05555',
+          backgroundColor: 'rgba(224,85,85,0.10)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: 5,
+          pointBackgroundColor: '#e05555',
+          pointBorderColor: '#0d0d0f',
+          pointBorderWidth: 2,
+          borderWidth: 2,
+        },
+        {
+          label: 'Saldo',
+          data: saldo,
+          borderColor: '#c9a96e',
+          backgroundColor: 'rgba(201,169,110,0.08)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: 5,
+          pointBackgroundColor: '#c9a96e',
+          pointBorderColor: '#0d0d0f',
+          pointBorderWidth: 2,
+          borderWidth: 2,
+          borderDash: [5,3],
+        },
       ]
     },
-    options: chartOpts()
+    options: {
+      ...chartOpts(),
+      plugins: {
+        ...chartOpts().plugins,
+        legend: { labels: { color: '#888', font: { size: 11 }, boxWidth: 10, padding: 14 } },
+        tooltip: {
+          backgroundColor: '#18181b',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          titleColor: '#f0ede8',
+          bodyColor: '#888',
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.raw)}` }
+        }
+      }
+    }
   });
 
+  // ── Waterfall saldo trimestrale ──
+  // Costruiamo tutte le etichette trimestrali presenti nei dati
+  const trimSet = new Set();
+  speseData.forEach(r => {
+    if (!r.data) return;
+    const y = r.data.getFullYear();
+    const q = Math.floor(r.data.getMonth()/3)+1;
+    trimSet.add(`${y}-Q${q}`);
+  });
+  const trimLabels = [...trimSet].sort();
+
+  // Saldo per trimestre
+  const trimSaldi = trimLabels.map(label => {
+    const [y, q] = label.split('-Q');
+    const year = parseInt(y), quarter = parseInt(q);
+    const months = [0,1,2].map(i => (quarter-1)*3+i);
+    const e = speseData.filter(r=>r.tipo==='Entrate'&&r.data?.getFullYear()===year&&months.includes(r.data.getMonth())).reduce((s,r)=>s+r.costo,0);
+    const u = speseData.filter(r=>r.tipo==='Uscite' &&r.data?.getFullYear()===year&&months.includes(r.data.getMonth())).reduce((s,r)=>s+r.costo,0);
+    return e - u;
+  });
+
+  // Waterfall: base (floating bar) = cumulative start, size = value
+  let cumulative = 0;
+  const wfBase  = [];
+  const wfVal   = [];
+  const wfColor = [];
+  trimSaldi.forEach(v => {
+    wfBase.push(cumulative);
+    wfVal.push(v);
+    wfColor.push(v >= 0 ? 'rgba(92,184,92,0.7)' : 'rgba(224,85,85,0.7)');
+    cumulative += v;
+  });
+
+  if (chartWaterfall) chartWaterfall.destroy();
+  chartWaterfall = new Chart($('chartWaterfall'), {
+    type: 'bar',
+    data: {
+      labels: trimLabels,
+      datasets: [
+        // Base invisibile (floating start)
+        {
+          label: '_base',
+          data: wfBase,
+          backgroundColor: 'transparent',
+          borderWidth: 0,
+          stack: 'wf',
+        },
+        // Valore effettivo
+        {
+          label: 'Saldo trimestre',
+          data: wfVal,
+          backgroundColor: wfColor,
+          borderColor: wfColor.map(c => c.replace('0.7','1')),
+          borderWidth: 1,
+          borderRadius: 4,
+          stack: 'wf',
+        }
+      ]
+    },
+    options: {
+      ...chartOpts(),
+      plugins: {
+        ...chartOpts().plugins,
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#18181b',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          titleColor: '#f0ede8',
+          bodyColor: '#888',
+          filter: item => item.datasetIndex === 1,
+          callbacks: { label: ctx => ` Saldo: ${fmt(ctx.raw)}` }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#666', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { stacked: true, ticks: { color: '#666', font: { size: 11 }, callback: v => '€'+v.toLocaleString('it-IT') }, grid: { color: 'rgba(255,255,255,0.04)' } }
+      }
+    }
+  });
+
+  // Tabella
   $('generaleBody').innerHTML = anni.map((a,i) => {
     const s = ent[i]-usc[i];
     return `<tr>
