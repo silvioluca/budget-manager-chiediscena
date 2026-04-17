@@ -9,7 +9,7 @@
 
 // ── CONFIGURAZIONE ───────────────────────────────────────
 // Sostituisci con l'URL del tuo Google Apps Script deployato
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzIdSBkSIwnAz_PytrLHdgOMRPjNt7Iqz75dTK-m57AyvRdtuumdxlq8DxykCR9uTCGHg/exec';
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
 
 // Nomi dei fogli
 const SHEET_SPESE     = 'Entrate/Uscite';
@@ -716,7 +716,6 @@ function renderGenerale() {
   });
 
   // ── Waterfall saldo trimestrale ──
-  // Costruiamo tutte le etichette trimestrali presenti nei dati
   const trimSet = new Set();
   speseData.forEach(r => {
     if (!r.data) return;
@@ -726,7 +725,6 @@ function renderGenerale() {
   });
   const trimLabels = [...trimSet].sort();
 
-  // Saldo per trimestre
   const trimSaldi = trimLabels.map(label => {
     const [y, q] = label.split('-Q');
     const year = parseInt(y), quarter = parseInt(q);
@@ -736,48 +734,43 @@ function renderGenerale() {
     return e - u;
   });
 
-  // Waterfall: base (floating bar) = cumulative start, size = value
-  let cumulative = 0;
-  const wfBase  = [];
-  const wfVal   = [];
-  const wfColor = [];
+  // Floating bar: ogni barra = [min(start,end), max(start,end)]
+  // Chart.js floating bar accetta data: [[y0, y1]]
+  let running = 0;
+  const wfData   = [];
+  const wfColors = [];
+  const wfLabels = [...trimLabels, 'TOTALE'];
+
   trimSaldi.forEach(v => {
-    wfBase.push(cumulative);
-    wfVal.push(v);
-    wfColor.push(v >= 0 ? 'rgba(92,184,92,0.7)' : 'rgba(224,85,85,0.7)');
-    cumulative += v;
+    const start = running;
+    const end   = running + v;
+    wfData.push([start, end]);
+    wfColors.push(v >= 0 ? 'rgba(92,184,92,0.75)' : 'rgba(224,85,85,0.75)');
+    running = end;
   });
+  // Barra totale: da 0 al valore finale
+  const totFinale = running;
+  wfData.push([0, totFinale]);
+  wfColors.push(totFinale >= 0 ? 'rgba(201,169,110,0.85)' : 'rgba(224,85,85,0.85)');
 
   if (chartWaterfall) chartWaterfall.destroy();
   chartWaterfall = new Chart($('chartWaterfall'), {
     type: 'bar',
     data: {
-      labels: trimLabels,
-      datasets: [
-        // Base invisibile (floating start)
-        {
-          label: '_base',
-          data: wfBase,
-          backgroundColor: 'transparent',
-          borderWidth: 0,
-          stack: 'wf',
-        },
-        // Valore effettivo
-        {
-          label: 'Saldo trimestre',
-          data: wfVal,
-          backgroundColor: wfColor,
-          borderColor: wfColor.map(c => c.replace('0.7','1')),
-          borderWidth: 1,
-          borderRadius: 4,
-          stack: 'wf',
-        }
-      ]
+      labels: wfLabels,
+      datasets: [{
+        label: 'Saldo',
+        data: wfData,
+        backgroundColor: wfColors,
+        borderColor: wfColors.map(c => c.replace(/[\d.]+\)$/, '1)')),
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
     },
     options: {
-      ...chartOpts(),
+      responsive: true,
+      maintainAspectRatio: false,
       plugins: {
-        ...chartOpts().plugins,
         legend: { display: false },
         tooltip: {
           backgroundColor: '#18181b',
@@ -785,13 +778,18 @@ function renderGenerale() {
           borderWidth: 1,
           titleColor: '#f0ede8',
           bodyColor: '#888',
-          filter: item => item.datasetIndex === 1,
-          callbacks: { label: ctx => ` Saldo: ${fmt(ctx.raw)}` }
+          callbacks: {
+            label: ctx => {
+              const [lo, hi] = ctx.raw;
+              const val = hi - lo;
+              return ` ${fmt(val)}  (cumulato: ${fmt(hi)})`;
+            }
+          }
         }
       },
       scales: {
-        x: { stacked: true, ticks: { color: '#666', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { stacked: true, ticks: { color: '#666', font: { size: 11 }, callback: v => '€'+v.toLocaleString('it-IT') }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#666', font: { size: 11 }, callback: v => '€'+v.toLocaleString('it-IT') }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });
@@ -832,14 +830,50 @@ async function renderTabelle() {
 }
 
 // ── ALLIEVI ───────────────────────────────────────────────
+// Palette colori per tipologia (ciclica)
+const TIPO_COLORS = [
+  { bg: 'rgba(201,169,110,0.15)', border: '#c9a96e', text: '#c9a96e' },
+  { bg: 'rgba(92,184,92,0.12)',   border: '#5cb85c', text: '#5cb85c' },
+  { bg: 'rgba(91,192,222,0.12)',  border: '#5bc0de', text: '#5bc0de' },
+  { bg: 'rgba(155,89,182,0.12)',  border: '#9b59b6', text: '#9b59b6' },
+  { bg: 'rgba(230,126,34,0.12)',  border: '#e67e22', text: '#e67e22' },
+  { bg: 'rgba(26,188,156,0.12)',  border: '#1abc9c', text: '#1abc9c' },
+];
+const tipoColorMap = {};
+let tipoColorIdx = 0;
+function getTipoColor(tipo) {
+  if (!tipo) return { bg:'rgba(255,255,255,0.05)', border:'#555', text:'#888' };
+  if (!tipoColorMap[tipo]) {
+    tipoColorMap[tipo] = TIPO_COLORS[tipoColorIdx % TIPO_COLORS.length];
+    tipoColorIdx++;
+  }
+  return tipoColorMap[tipo];
+}
+
+let allieviSortCol = 'nomeCompleto';
+let allieviSortAsc = true;
+let editAllieviIdx = null; // null = nuovo, number = _idx esistente
+
 async function renderAllievi() {
   $('allieviLoading').style.display=''; $('allieviTableWrap').style.display='none'; $('allieviEmpty').style.display='none';
   if (!allieviData.length) await loadAllievi();
   $('allieviLoading').style.display='none';
 
-  // Popola filtro tipo
   const tipi = [...new Set(allieviData.map(r=>r.tipo).filter(Boolean))].sort();
   $('filterTipoAllievo').innerHTML = '<option value="">Tutti i tipi</option>' + tipi.map(t=>`<option value="${t}">${t}</option>`).join('');
+
+  // Sortable headers
+  document.querySelectorAll('#allieviTable th.sortable').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.onclick = () => {
+      const col = th.dataset.acol;
+      if (allieviSortCol === col) allieviSortAsc = !allieviSortAsc;
+      else { allieviSortCol = col; allieviSortAsc = true; }
+      document.querySelectorAll('#allieviTable th.sortable .sort-arrow').forEach(a => a.textContent = '↕');
+      th.querySelector('.sort-arrow').textContent = allieviSortAsc ? '↑' : '↓';
+      applyAllieviFilters();
+    };
+  });
 
   applyAllieviFilters();
 }
@@ -847,25 +881,117 @@ async function renderAllievi() {
 function applyAllieviFilters() {
   const search = $('searchAllievi').value.toLowerCase();
   const tipo   = $('filterTipoAllievo').value;
-  const filtered = allieviData.filter(r => {
+  let filtered = allieviData.filter(r => {
     if (search && !r.nomeCompleto.toLowerCase().includes(search) && !r.mail.toLowerCase().includes(search)) return false;
     if (tipo && r.tipo !== tipo) return false;
     return true;
   });
 
+  // Sort
+  filtered = filtered.sort((a, b) => {
+    let va = String(a[allieviSortCol]||'').toLowerCase();
+    let vb = String(b[allieviSortCol]||'').toLowerCase();
+    return allieviSortAsc ? va.localeCompare(vb,'it') : vb.localeCompare(va,'it');
+  });
+
   if (!filtered.length) { $('allieviTableWrap').style.display='none'; $('allieviEmpty').style.display=''; return; }
   $('allieviEmpty').style.display='none'; $('allieviTableWrap').style.display='';
 
-  $('allieviBody').innerHTML = filtered.map(r => `
-    <tr>
-      <td>${escHtml(r.nomeCompleto)}</td>
-      <td><span class="badge badge-gray">${escHtml(r.tipo)}</span></td>
-      <td>${escHtml(String(r.tesseramento))}</td>
+  $('allieviBody').innerHTML = filtered.map(r => {
+    const c = getTipoColor(r.tipo);
+    const badgeStyle = `background:${c.bg};border:1px solid ${c.border};color:${c.text};display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:500;`;
+    return `<tr>
+      <td style="font-weight:500">${escHtml(r.nomeCompleto)}</td>
+      <td><span style="${badgeStyle}">${escHtml(r.tipo)}</span></td>
+      <td style="color:var(--text-muted)">${escHtml(String(r.tesseramento))}</td>
       <td style="color:var(--text-muted)">${escHtml(r.cellulare)}</td>
       <td style="color:var(--text-muted)">${escHtml(r.mail)}</td>
-      <td style="color:var(--text-muted);font-size:12px;">${escHtml(r.note)}</td>
-    </tr>
-  `).join('');
+      <td style="color:var(--text-dim);font-size:12px;">${escHtml(r.note)}</td>
+      <td>
+        <div style="display:flex;gap:4px;">
+          <button class="btn-table" onclick="openEditAllievo(${r._idx})" title="Modifica">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="btn-table btn-del" onclick="deleteAllievo(${r._idx})" title="Elimina">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M5 3V2h2v1M4 3v6M8 3v6M3 3l.5 7h5L9 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openNewAllievo() {
+  editAllieviIdx = null;
+  $('modalAllieviTitle').textContent = 'Nuovo allievo';
+  ['aCognome','aNome','aTipo','aTesseramento','aCellulare','aMail','aIndirizzo','aNote'].forEach(id => { $(id).value=''; });
+  $('modalAllieviOverlay').style.display = 'flex';
+  $('aCognome').focus();
+}
+
+function openEditAllievo(idx) {
+  const r = allieviData.find(r => r._idx === idx);
+  if (!r) return;
+  editAllieviIdx = idx;
+  $('modalAllieviTitle').textContent = 'Modifica allievo';
+  $('aCognome').value      = r.cognome;
+  $('aNome').value         = r.nome;
+  $('aTipo').value         = r.tipo;
+  $('aTesseramento').value = r.tesseramento;
+  $('aCellulare').value    = r.cellulare;
+  $('aMail').value         = r.mail;
+  $('aIndirizzo').value    = r.indirizzo;
+  $('aNote').value         = r.note;
+  $('modalAllieviOverlay').style.display = 'flex';
+}
+
+function closeAllieviModal() { $('modalAllieviOverlay').style.display = 'none'; editAllieviIdx = null; }
+
+async function saveAllievo() {
+  const cognome     = $('aCognome').value.trim();
+  const nome        = $('aNome').value.trim();
+  const tipo        = $('aTipo').value.trim();
+  const tesseramento= $('aTesseramento').value.trim();
+  const cellulare   = $('aCellulare').value.trim();
+  const mail        = $('aMail').value.trim();
+  const indirizzo   = $('aIndirizzo').value.trim();
+  const note        = $('aNote').value.trim();
+  const nomeCompleto= `${cognome} ${nome}`.trim();
+
+  if (!cognome && !nome) return alert('Inserisci almeno cognome o nome.');
+
+  const row = [cognome, nome, nomeCompleto, tipo, tesseramento, cellulare, mail, indirizzo, note];
+
+  if (editAllieviIdx === null) {
+    // Nuovo
+    const res = await apiPost({ action: 'append', sheet: SHEET_ALLIEVI, row });
+    if (res.ok !== false) {
+      allieviData.push({ _idx: allieviData.length + 2, cognome, nome, nomeCompleto, tipo, tesseramento, cellulare, mail, indirizzo, note });
+      closeAllieviModal();
+      applyAllieviFilters();
+    }
+  } else {
+    // Modifica
+    const res = await apiPost({ action: 'update', sheet: SHEET_ALLIEVI, rowIndex: editAllieviIdx, row });
+    if (res.ok !== false) {
+      const r = allieviData.find(r => r._idx === editAllieviIdx);
+      if (r) Object.assign(r, { cognome, nome, nomeCompleto, tipo, tesseramento, cellulare, mail, indirizzo, note });
+      closeAllieviModal();
+      applyAllieviFilters();
+    }
+  }
+}
+
+async function deleteAllievo(idx) {
+  const r = allieviData.find(r => r._idx === idx);
+  if (!r) return;
+  const ok = confirm(`Eliminare l'allievo "${r.nomeCompleto}"?\nQuesta operazione non può essere annullata.`);
+  if (!ok) return;
+  const res = await apiPost({ action: 'delete', sheet: SHEET_ALLIEVI, rowIndex: idx });
+  if (res.ok !== false) {
+    allieviData = allieviData.filter(r => r._idx !== idx);
+    applyAllieviFilters();
+  }
 }
 
 // ── ISCRIZIONI ────────────────────────────────────────────
@@ -977,11 +1103,18 @@ async function init() {
     item.addEventListener('click', () => showSection(item.dataset.section));
   });
 
-  // Modal
+  // Modal spesa
   $('modalClose').addEventListener('click', closeModal);
   $('modalCancel').addEventListener('click', closeModal);
   $('modalSave').addEventListener('click', saveEdit);
   $('modalOverlay').addEventListener('click', e => { if (e.target === $('modalOverlay')) closeModal(); });
+
+  // Modal allievo
+  $('btnNuovoAllievo').addEventListener('click', openNewAllievo);
+  $('modalAllieviClose').addEventListener('click', closeAllieviModal);
+  $('modalAllieviCancel').addEventListener('click', closeAllieviModal);
+  $('modalAllieviSave').addEventListener('click', saveAllievo);
+  $('modalAllieviOverlay').addEventListener('click', e => { if (e.target === $('modalAllieviOverlay')) closeAllieviModal(); });
 
   // Filtri allievi/iscrizioni live
   $('searchAllievi').addEventListener('input', applyAllieviFilters);
