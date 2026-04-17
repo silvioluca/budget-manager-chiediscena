@@ -378,9 +378,13 @@
           <h1 class="section-title">Allievi</h1>
           <p class="section-subtitle">Registro degli allievi della scuola.</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:flex-end;">
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
           <input type="text" class="filter-select" id="searchAllievi" placeholder="Cerca nome…" style="width:180px;">
           <select class="filter-select" id="filterTipoAllievo"><option value="">Tutti i tipi</option></select>
+          <button class="btn-primary" id="btnNuovoAllievo">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            Nuovo allievo
+          </button>
         </div>
       </div>
       <div class="table-loading" id="allieviLoading">
@@ -391,12 +395,13 @@
         <table class="data-table" id="allieviTable">
           <thead>
             <tr>
-              <th>Nome completo</th>
-              <th>Tipo</th>
-              <th>Tesseramento</th>
-              <th>Cellulare</th>
-              <th>Mail</th>
+              <th class="sortable" data-acol="nomeCompleto">Nome completo <span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-acol="tipo">Tipo <span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-acol="tesseramento">Tesseramento <span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-acol="cellulare">Cellulare <span class="sort-arrow">↕</span></th>
+              <th class="sortable" data-acol="mail">Mail <span class="sort-arrow">↕</span></th>
               <th>Note</th>
+              <th style="width:72px"></th>
             </tr>
           </thead>
           <tbody id="allieviBody"></tbody>
@@ -498,6 +503,60 @@
     <div class="modal-footer">
       <button class="btn-secondary" id="modalCancel">Annulla</button>
       <button class="btn-primary" id="modalSave">Salva modifiche</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ALLIEVO (nuovo / modifica) -->
+<div class="modal-overlay" id="modalAllieviOverlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalAllieviTitle">Nuovo allievo</span>
+      <button class="modal-close" id="modalAllieviClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Cognome</label>
+          <input type="text" class="form-input" id="aCognome" placeholder="Rossi">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nome</label>
+          <input type="text" class="form-input" id="aNome" placeholder="Giulia">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Tipo</label>
+          <input type="text" class="form-input" id="aTipo" placeholder="es. Adulti, Bambini…">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tesseramento</label>
+          <input type="text" class="form-input" id="aTesseramento" placeholder="2025">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Cellulare</label>
+          <input type="text" class="form-input" id="aCellulare" placeholder="333-1234567">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mail</label>
+          <input type="email" class="form-input" id="aMail" placeholder="email@dominio.it">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Indirizzo</label>
+        <input type="text" class="form-input" id="aIndirizzo" placeholder="Via Roma 1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Note</label>
+        <input type="text" class="form-input" id="aNote" placeholder="Note opzionali…">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modalAllieviCancel">Annulla</button>
+      <button class="btn-primary" id="modalAllieviSave">Salva</button>
     </div>
   </div>
 </div>
