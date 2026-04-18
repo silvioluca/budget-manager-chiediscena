@@ -446,12 +446,36 @@
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 class="section-title">Iscrizioni</h1>
-          <p class="section-subtitle">Abbonamenti e iscrizioni degli allievi.</p>
+          <p class="section-subtitle">Registro delle iscrizioni ai corsi.</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:flex-end;">
-          <input type="text" class="filter-select" id="searchIscrizioni" placeholder="Cerca allievo…" style="width:180px;">
-          <select class="filter-select" id="filterAS"><option value="">Tutte le A.S.</option></select>
+        <button class="btn-primary" id="btnNuovaIscrizione">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Nuova iscrizione
+        </button>
+      </div>
+      <!-- Filtri -->
+      <div class="filters-bar" style="margin-bottom:16px;">
+        <div class="filter-group">
+          <label class="form-label">Cerca</label>
+          <input type="text" class="filter-select" id="searchIscrizioni" placeholder="Allievo o corso…" style="width:180px;">
         </div>
+        <div class="filter-group">
+          <label class="form-label">A.S.</label>
+          <select class="filter-select" id="filterAS"><option value="">Tutte</option></select>
+        </div>
+        <div class="filter-group">
+          <label class="form-label">Pagato</label>
+          <select class="filter-select" id="filterPagato">
+            <option value="">Tutti</option>
+            <option value="si">Sì</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+        <button class="btn-secondary" id="btnClearIscFiltri" style="align-self:flex-end">Azzera</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span class="count-label" id="iscrizioniCount">— iscrizioni</span>
+        <span class="totals-label" id="iscrizioniTotale"></span>
       </div>
       <div class="table-loading" id="iscrizioniLoading">
         <svg class="spin" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="var(--border)" stroke-width="2"/><path d="M9 2a7 7 0 0 1 7 7" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
@@ -463,14 +487,14 @@
             <tr>
               <th>Allievo</th>
               <th>A.S.</th>
-              <th>Abbonamento</th>
-              <th>Mesi</th>
-              <th>Data inizio</th>
-              <th>Data fine</th>
+              <th>Data</th>
+              <th>Tipo</th>
+              <th>Corso</th>
+              <th>Data pag.</th>
               <th>Pagato</th>
-              <th>Corsi</th>
               <th style="text-align:right">Costo</th>
               <th>Note</th>
+              <th style="width:72px"></th>
             </tr>
           </thead>
           <tbody id="iscrizioniBody"></tbody>
@@ -591,6 +615,84 @@
     <div class="modal-footer">
       <button class="btn-secondary" id="modalAllieviCancel">Annulla</button>
       <button class="btn-primary" id="modalAllieviSave">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ISCRIZIONE -->
+<div class="modal-overlay" id="modalIscOverlay" style="display:none;">
+  <div class="modal" style="width:520px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modalIscTitle">Nuova iscrizione</span>
+      <button class="modal-close" id="modalIscClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Allievo (datalist) -->
+      <div class="form-group">
+        <label class="form-label">Allievo</label>
+        <input type="text" class="form-input" id="iAllievo" placeholder="Digita per cercare…" list="allieviList" autocomplete="off">
+        <datalist id="allieviList"></datalist>
+      </div>
+      <!-- A.S. + Data -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Anno scolastico</label>
+          <input type="text" class="form-input" id="iAS" placeholder="2024/2025">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data iscrizione</label>
+          <input type="date" class="form-input" id="iData">
+        </div>
+      </div>
+      <!-- Tipo chip -->
+      <div class="form-group">
+        <label class="form-label">Tipo</label>
+        <div class="cat-grid" id="iTipoGrid">
+          <button type="button" class="cat-chip" data-tipo="Prova">Prova</button>
+          <button type="button" class="cat-chip" data-tipo="x1">x1</button>
+          <button type="button" class="cat-chip" data-tipo="x5">x5</button>
+          <button type="button" class="cat-chip" data-tipo="x10">x10</button>
+        </div>
+        <input type="hidden" id="iTipo">
+      </div>
+      <!-- Corso -->
+      <div class="form-group">
+        <label class="form-label">Corso</label>
+        <select class="form-input" id="iCorso">
+          <option value="">— seleziona corso —</option>
+        </select>
+      </div>
+      <!-- Costo (auto) -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Costo (€) <span style="color:var(--text-dim);font-size:10px;font-weight:400;">(auto da corso + tipo)</span></label>
+          <div class="input-prefix-wrap">
+            <span class="input-prefix">€</span>
+            <input type="number" class="form-input with-prefix" id="iCosto" min="0" step="0.01" placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data pagamento</label>
+          <input type="date" class="form-input" id="iDataPag">
+        </div>
+      </div>
+      <!-- Pagato checkbox -->
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;">
+        <label class="form-label" style="margin:0;">Pagato</label>
+        <label class="checkbox-wrap" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="iPagato" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
+          <span style="font-size:13px;color:var(--text-muted)">Sì, già pagato</span>
+        </label>
+      </div>
+      <!-- Note -->
+      <div class="form-group">
+        <label class="form-label">Note</label>
+        <input type="text" class="form-input" id="iNote" placeholder="Note opzionali…">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modalIscCancel">Annulla</button>
+      <button class="btn-primary" id="modalIscSave">Salva</button>
     </div>
   </div>
 </div>
