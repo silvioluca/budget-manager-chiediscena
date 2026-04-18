@@ -25,6 +25,25 @@
   --transition:0.22s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* ─── LIGHT THEME ────────────────────────────────────── */
+body.light {
+  --bg:        #f5f4f0;
+  --surface:   #ffffff;
+  --surface2:  #f0eeea;
+  --border:    rgba(0,0,0,0.08);
+  --border2:   rgba(0,0,0,0.14);
+  --text:      #1a1814;
+  --text-muted:#777;
+  --text-dim:  #aaa;
+  --accent:    #a07840;
+  --accent-dim:rgba(160,120,64,0.10);
+  --accent-mid:rgba(160,120,64,0.18);
+  --green:     #2e8b2e;
+  --red:       #cc3333;
+  --green-dim: rgba(46,139,46,0.10);
+  --red-dim:   rgba(204,51,51,0.10);
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
@@ -603,4 +622,51 @@ html, body {
   font-size: 10px;
   color: var(--text-dim);
   margin-left: 4px;
+}
+
+/* ─── LIGHT THEME OVERRIDES ──────────────────────────── */
+body.light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
+
+body.light .hamburger span { background: var(--text-muted); }
+
+body.light .form-input,
+body.light .filter-select {
+  color-scheme: light;
+}
+
+body.light .data-table tbody tr:hover { background: var(--surface2); }
+
+body.light .modal {
+  box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+}
+
+body.light .btn-primary {
+  border-color: rgba(160,120,64,0.30);
+}
+body.light .btn-primary:hover {
+  border-color: rgba(160,120,64,0.55);
+}
+
+/* Chart.js canvas non ha bisogno di override — usa CSS vars nei callbacks */
+body.light .cat-chip {
+  border-color: rgba(0,0,0,0.12);
+  color: var(--text-muted);
+}
+body.light .cat-chip:hover {
+  border-color: rgba(0,0,0,0.22);
+  color: var(--text);
+}
+body.light .cat-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+body.light .type-toggle {
+  background: var(--surface2);
+}
+
+body.light .pivot-table tfoot td,
+body.light .pivot-total td {
+  background: var(--surface2);
 }
