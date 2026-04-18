@@ -122,6 +122,18 @@
       </svg>
       Iscrizioni
     </div>
+    <div class="nav-item" data-section="presenze">
+      <svg class="nav-icon" viewBox="0 0 18 18" fill="none">
+        <rect x="2" y="3" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.4"/>
+        <line x1="2" y1="7" x2="16" y2="7" stroke="currentColor" stroke-width="1.2"/>
+        <line x1="6" y1="1" x2="6" y2="5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="12" y1="1" x2="12" y2="5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <circle cx="6" cy="11" r="1.2" fill="currentColor"/>
+        <circle cx="9" cy="11" r="1.2" fill="currentColor"/>
+        <circle cx="12" cy="11" r="1.2" fill="currentColor"/>
+      </svg>
+      Presenze
+    </div>
   </nav>
 
   <!-- MAIN -->
@@ -503,6 +515,50 @@
       <div class="table-empty" id="iscrizioniEmpty" style="display:none;">Nessuna iscrizione trovata.</div>
     </section>
 
+
+    <!-- ── PRESENZE ── -->
+    <section class="section" id="sec-presenze">
+      <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h1 class="section-title">Presenze</h1>
+          <p class="section-subtitle">Registro delle presenze ai corsi.</p>
+        </div>
+        <button class="btn-primary" id="btnNuovaPresenza">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Registra presenza
+        </button>
+      </div>
+
+      <!-- View switcher + filtri -->
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+        <div class="pres-view-switch">
+          <button class="pres-view-btn active" data-view="calendario">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/><line x1="1" y1="5.5" x2="13" y2="5.5" stroke="currentColor" stroke-width="1.1"/><line x1="4.5" y1="0.5" x2="4.5" y2="3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="9.5" y1="0.5" x2="9.5" y2="3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Calendario
+          </button>
+          <button class="pres-view-btn" data-view="elenco">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="2" y1="4" x2="12" y2="4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Elenco
+          </button>
+          <button class="pres-view-btn" data-view="corso">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="4" r="2.5" stroke="currentColor" stroke-width="1.3"/><path d="M2 12c0-2.761 2.239-4 5-4s5 1.239 5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Per corso
+          </button>
+          <button class="pres-view-btn" data-view="allievo">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M1 11c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="10" y1="4" x2="13" y2="4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="10" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Per allievo
+          </button>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select class="filter-select" id="presFiltroCorso" style="width:160px;"><option value="">Tutti i corsi</option></select>
+          <input type="month" class="filter-select" id="presFiltroMese" style="width:140px;">
+        </div>
+      </div>
+
+      <!-- Views -->
+      <div id="presView"></div>
+    </section>
+
   </main>
 </div>
 
@@ -693,6 +749,52 @@
     <div class="modal-footer">
       <button class="btn-secondary" id="modalIscCancel">Annulla</button>
       <button class="btn-primary" id="modalIscSave">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PRESENZA -->
+<div class="modal-overlay" id="modalPresOverlay" style="display:none;">
+  <div class="modal" style="width:540px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modalPresTitle">Registra presenza</span>
+      <button class="modal-close" id="modalPresClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Giorno</label>
+          <input type="date" class="form-input" id="pGiorno">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Corso</label>
+          <select class="form-input" id="pCorso">
+            <option value="">— seleziona —</option>
+          </select>
+        </div>
+      </div>
+      <!-- Lista allievi iscritti con checkbox -->
+      <div class="form-group">
+        <label class="form-label">Allievi presenti <span id="presConteggioLabel" style="color:var(--text-dim);font-weight:400;"></span></label>
+        <div id="presAllieviList" class="pres-checklist"></div>
+      </div>
+      <!-- Aggiungi allievo extra -->
+      <div class="form-group">
+        <label class="form-label">Aggiungi allievo (non iscritto)</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" class="form-input" id="pExtraAllievo" placeholder="Nome…" list="allieviList" style="flex:1;" autocomplete="off">
+          <button class="btn-secondary" id="btnPresAddExtra" style="white-space:nowrap;">Aggiungi</button>
+        </div>
+        <div id="presExtraList" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Note</label>
+        <input type="text" class="form-input" id="pNote" placeholder="Note opzionali…">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modalPresCancel">Annulla</button>
+      <button class="btn-primary" id="modalPresSave">Salva presenze</button>
     </div>
   </div>
 </div>
