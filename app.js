@@ -1250,9 +1250,46 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── TEMA ─────────────────────────────────────────────────
+function applyTheme(theme) {
+  document.body.classList.toggle('light', theme === 'light');
+  localStorage.setItem('danza_theme', theme);
+  // Icone
+  const sun  = $('iconSun');
+  const moon = $('iconMoon');
+  if (sun && moon) {
+    sun.style.display  = theme === 'light' ? '' : 'none';
+    moon.style.display = theme === 'light' ? 'none' : '';
+  }
+  // Ridisegna i grafici con i colori corretti
+  const gridColor = theme === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.04)';
+  const tickColor = theme === 'light' ? '#999' : '#666';
+  Chart.defaults.color = tickColor;
+  Chart.defaults.borderColor = gridColor;
+  // Re-render sezione attiva se ha grafici
+  const active = document.querySelector('.section.active');
+  if (active) {
+    const id = active.id.replace('sec-','');
+    if (['dashboard','annuale','generale'].includes(id)) {
+      setTimeout(() => {
+        if (id==='dashboard') renderDashboard();
+        if (id==='annuale')   updateAnnuale(parseInt($('annoRiep').value), parseInt($('meseRiep').value)||null);
+        if (id==='generale')  renderGenerale();
+      }, 50);
+    }
+  }
+}
+
 // ── INIT ──────────────────────────────────────────────────
 async function init() {
-  // Sidebar toggle
+  // Tema chiaro/scuro
+  const savedTheme = localStorage.getItem('danza_theme') || 'dark';
+  if (savedTheme === 'light') applyTheme('light');
+
+  $('btnTheme').addEventListener('click', () => {
+    const isLight = document.body.classList.contains('light');
+    applyTheme(isLight ? 'dark' : 'light');
+  });
   $('hamburger').addEventListener('click', () => {
     const sb = $('sidebar');
     const main = document.querySelector('.main');
