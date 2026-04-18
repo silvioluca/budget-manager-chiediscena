@@ -1516,11 +1516,13 @@ function renderPresCalendario(el) {
     const dt = new Date(y, m, d);
     const isToday = dt.getTime() === today.getTime();
     const records = byDay[d] || [];
-    const pills   = records.map(r =>
-      `<div class="pres-cal-pill" title="${escHtml(r.corso)}: ${escHtml(r.allievi.join(', '))}">${escHtml(r.corso)}</div>`
+    const pills = records.map(r =>
+      `<div class="pres-cal-pill" title="${escHtml(r.corso)}: ${escHtml(r.allievi.join(', '))}"
+        onclick="event.stopPropagation();openEditPresenza(${r._idx})">${escHtml(r.corso)}</div>`
     ).join('');
+    const dayStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     cells += `<div class="pres-cal-day${isToday?' pres-cal-today':''}${records.length?' pres-cal-has-data':''}"
-      onclick="openPresForDay('${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}', null)">
+      onclick="openPresForDay('${dayStr}', null)">
       <div class="pres-cal-day-num">${d}</div>
       <div class="pres-cal-dot">${pills}</div>
     </div>`;
@@ -1689,43 +1691,74 @@ function populatePCorso(selected) {
   const sel = document.getElementById('pCorso');
   sel.innerHTML = '<option value="">\u2014 seleziona \u2014</option>' +
     corsiData.map(c=>`<option value="${escHtml(c.nome)}"${c.nome===selected?' selected':''}>${escHtml(c.nome)}</option>`).join('');
-  if (selected) renderPresChecklist(editPresIdx ? (presenzeData.find(r=>r._idx===editPresIdx)||{}).allievi||[] : []);
-  sel.onchange = () => renderPresChecklist(editPresIdx ? (presenzeData.find(r=>r._idx===editPresIdx)||{}).allievi||[] : []);
+  // When editing, pre-load the allievi of this record; when new, empty
+  const getChecked = () => editPresIdx ? ((presenzeData.find(r=>r._idx===editPresIdx)||{}).allievi||[]) : [];
+  if (selected) renderPresChecklist(getChecked());
+  sel.onchange = () => renderPresChecklist([]); // on manual corso change, reset checks
 }
 
 function getAllieviForCorso(nomeCorso) {
-  // Allievi iscritti a quel corso
-  const iscr = iscrizioniData.filter(r => r.corso === nomeCorso).map(r => r.allievo);
-  // Aggiungi tutti gli allievi noti (union) ordinati
-  const tutti = [...new Set([...iscr, ...allieviData.map(a=>a.nomeCompleto)])].sort((a,b)=>a.localeCompare(b,'it'));
-  return { iscritti: new Set(iscr), tutti };
+  // Solo gli allievi iscritti a quel corso, ordinati alfabeticamente
+  const iscr = [...new Set(iscrizioniData.filter(r => r.corso === nomeCorso).map(r => r.allievo))]
+    .sort((a,b)=>a.localeCompare(b,'it'));
+  return iscr;
 }
 
 function renderPresChecklist(checked) {
   const nomeCorso = document.getElementById('pCorso').value;
   const list      = document.getElementById('presAllieviList');
-  const countEl   = document.getElementById('presConteggioLabel');
-  if (!nomeCorso) { list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Seleziona prima un corso</div>'; return; }
+  if (!nomeCorso) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Seleziona prima un corso</div>';
+    updatePresConteggio();
+    return;
+  }
 
-  const { iscritti, tutti } = getAllieviForCorso(nomeCorso);
-  const checkedSet = new Set(checked);
+  const iscritti  = getAllieviForCorso(nomeCorso); // solo iscritti, già ordinati
+  const checkedSet= new Set(checked);
 
-  list.innerHTML = tutti.map(nome => {
-    const isIsc = iscritti.has(nome);
-    const isCk  = checkedSet.has(nome);
-    return `<label class="pres-check-item${isCk?' checked':''}" data-nome="${escHtml(nome)}">
-      <input type="checkbox" ${isCk?'checked':''} onchange="onPresCheck(this)">
-      <span class="pres-check-name">${escHtml(nome)}</span>
-      ${isIsc ? '<span style="font-size:10px;color:var(--accent);">iscritto</span>' : ''}
-    </label>`;
-  }).join('');
+  if (!iscritti.length) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Nessun allievo iscritto a questo corso.</div>';
+    updatePresConteggio();
+    return;
+  }
 
+  // Header: "Seleziona tutti" checkbox
+  const allChecked = iscritti.every(n => checkedSet.has(n));
+  list.innerHTML = `
+    <label class="pres-check-item" id="presCheckAll" data-nome="__all__"
+      style="border-bottom:1px solid var(--border);margin-bottom:4px;padding-bottom:8px;">
+      <input type="checkbox" id="cbSelectAll" ${allChecked?'checked':''}
+        onchange="toggleSelectAll(this)">
+      <span class="pres-check-name" style="font-weight:600;color:var(--text);">Seleziona tutti</span>
+      <span style="font-size:10px;color:var(--text-dim);">${iscritti.length} iscritti</span>
+    </label>
+    ${iscritti.map(nome => {
+      const isCk = checkedSet.has(nome);
+      return `<label class="pres-check-item${isCk?' checked':''}" data-nome="${escHtml(nome)}">
+        <input type="checkbox" ${isCk?'checked':''} onchange="onPresCheck(this)">
+        <span class="pres-check-name">${escHtml(nome)}</span>
+      </label>`;
+    }).join('')}`;
+
+  updatePresConteggio();
+}
+
+function toggleSelectAll(cb) {
+  const items = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll)')];
+  items.forEach(item => {
+    const box = item.querySelector('input[type=checkbox]');
+    if (box) { box.checked = cb.checked; item.classList.toggle('checked', cb.checked); }
+  });
   updatePresConteggio();
 }
 
 function onPresCheck(cb) {
   const item = cb.closest('.pres-check-item');
   item.classList.toggle('checked', cb.checked);
+  // Aggiorna stato "seleziona tutti"
+  const allBoxes  = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll) input[type=checkbox]')];
+  const cbAll     = document.getElementById('cbSelectAll');
+  if (cbAll) cbAll.checked = allBoxes.length > 0 && allBoxes.every(b => b.checked);
   updatePresConteggio();
 }
 
@@ -1738,17 +1771,17 @@ function updatePresConteggio() {
 function addPresExtra() {
   const val = document.getElementById('pExtraAllievo').value.trim();
   if (!val) return;
-  if (presExtraAllievi.includes(val)) { document.getElementById('pExtraAllievo').value=''; return; }
-  // Check non già in checklist
-  const inList = [...document.querySelectorAll('#presAllieviList .pres-check-item')]
-    .some(el => el.dataset.nome === val);
+  // Se è già tra gli iscritti in checklist, spunta il checkbox invece di aggiungerlo extra
+  const inList = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll)')]
+    .find(el => el.dataset.nome === val);
   if (inList) {
-    // Spunta il checkbox esistente
-    const cb = [...document.querySelectorAll('#presAllieviList .pres-check-item')]
-      .find(el => el.dataset.nome === val)?.querySelector('input');
-    if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
-    document.getElementById('pExtraAllievo').value=''; return;
+    const cb = inList.querySelector('input[type=checkbox]');
+    if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+    document.getElementById('pExtraAllievo').value = '';
+    return;
   }
+  // Altrimenti aggiungi come extra (non iscritto)
+  if (presExtraAllievi.includes(val)) { document.getElementById('pExtraAllievo').value=''; return; }
   presExtraAllievi.push(val);
   renderExtraChips();
   document.getElementById('pExtraAllievo').value = '';
