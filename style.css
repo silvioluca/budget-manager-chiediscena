@@ -587,3 +587,20 @@ html, body {
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .form-card { padding: 16px; }
 }
+
+/* ─── PIVOT TABLE ────────────────────────────────────────── */
+.pivot-table tfoot td,
+.pivot-total td {
+  font-weight: 600;
+  border-top: 2px solid var(--border2);
+  background: var(--surface2);
+  padding: 13px 14px;
+}
+.pivot-table tbody tr.row-neg td:last-child { /* guadagno negativo */
+  background: rgba(224,85,85,0.04);
+}
+.sort-arrow {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 4px;
+}
