@@ -9,7 +9,7 @@
 
 // ── CONFIGURAZIONE ───────────────────────────────────────
 // Sostituisci con l'URL del tuo Google Apps Script deployato
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzIdSBkSIwnAz_PytrLHdgOMRPjNt7Iqz75dTK-m57AyvRdtuumdxlq8DxykCR9uTCGHg/exec';
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
 
 // Nomi dei fogli
 const SHEET_SPESE     = 'Entrate/Uscite';
@@ -808,25 +808,189 @@ function renderGenerale() {
 }
 
 // ── TABELLE ───────────────────────────────────────────────
-async function renderTabelle() {
-  $('tabelleLoading').style.display = '';
-  $('tabelleContent').style.display = 'none';
-  if (!tabelleData.length) await loadTabelle();
-  $('tabelleLoading').style.display = 'none';
-  $('tabelleContent').style.display = '';
+const MESI_NOMI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
-  if (!tabelleData.length) { $('tabelleContent').innerHTML = '<p style="color:var(--text-muted);padding:20px;">Nessun dato nel foglio Tabelle.</p>'; return; }
+function renderTabelle() {
+  // Popola anni
+  const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort((a,b)=>b-a);
+  const annoSel = $('tabelleAnno');
+  const curAnno = annoSel.value || String(anni[0] || new Date().getFullYear());
+  annoSel.innerHTML = anni.map(a=>`<option value="${a}">${a}</option>`).join('');
+  annoSel.value = curAnno;
 
-  const header = tabelleData[0];
-  const rows   = tabelleData.slice(1);
+  const modalita = $('tabelleModalita').value;
+  $('tabelleAnnoGroup').style.display = modalita === 'anno' ? '' : 'none';
+
+  updateTabelle();
+}
+
+function updateTabelle() {
+  const modalita = $('tabelleModalita').value;
+  const annoSel  = parseInt($('tabelleAnno').value);
+
+  if (modalita === 'anno') {
+    renderTabellaSingoloAnno(annoSel);
+  } else {
+    renderTabellaMultiAnno();
+  }
+}
+
+function buildPivotAnno(anno) {
+  // Restituisce 12 righe: {mese, label, uscite, entrate, guadagno}
+  return MESI_NOMI.map((label, m) => {
+    const righe = speseData.filter(r => r.data?.getFullYear()===anno && r.data?.getMonth()===m);
+    const uscite  = righe.filter(r=>r.tipo==='Uscite').reduce((s,r)=>s+r.costo,0);
+    const entrate = righe.filter(r=>r.tipo==='Entrate').reduce((s,r)=>s+r.costo,0);
+    return { mese: m+1, label, uscite, entrate, guadagno: entrate-uscite };
+  });
+}
+
+function renderTabellaSingoloAnno(anno) {
+  const pivot = buildPivotAnno(anno);
+  const totEnt = pivot.reduce((s,r)=>s+r.entrate,0);
+  const totUsc = pivot.reduce((s,r)=>s+r.uscite,0);
+  const totGua = totEnt - totUsc;
+
   $('tabelleContent').innerHTML = `
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr>${header.map(h=>`<th>${escHtml(String(h))}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${escHtml(String(c??''))}</td>`).join('')}</tr>`).join('')}</tbody>
-      </table>
+    <div class="card">
+      <div class="card-title">Riepilogo mensile — ${anno}</div>
+      <div class="table-wrap" style="margin-top:0;">
+        <table class="data-table pivot-table">
+          <thead>
+            <tr>
+              <th>Mese</th>
+              <th style="text-align:right;color:var(--green)">Entrate</th>
+              <th style="text-align:right;color:var(--red)">Uscite</th>
+              <th style="text-align:right;color:var(--accent)">Guadagno</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pivot.map(r => `
+              <tr class="${r.guadagno < 0 ? 'row-neg' : ''}">
+                <td style="font-weight:500">${r.label}</td>
+                <td style="text-align:right;color:var(--green);font-variant-numeric:tabular-nums">${r.entrate ? fmt(r.entrate) : '<span style="color:var(--text-dim)">—</span>'}</td>
+                <td style="text-align:right;color:var(--red);font-variant-numeric:tabular-nums">${r.uscite ? fmt(r.uscite) : '<span style="color:var(--text-dim)">—</span>'}</td>
+                <td style="text-align:right;font-variant-numeric:tabular-nums;color:${r.guadagno>=0?'var(--green)':'var(--red)'}">${r.entrate||r.uscite ? fmt(r.guadagno) : '<span style="color:var(--text-dim)">—</span>'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+          <tfoot>
+            <tr class="pivot-total">
+              <td>Totale</td>
+              <td style="text-align:right;color:var(--green)">${fmt(totEnt)}</td>
+              <td style="text-align:right;color:var(--red)">${fmt(totUsc)}</td>
+              <td style="text-align:right;color:${totGua>=0?'var(--green)':'var(--red)'}">${fmt(totGua)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   `;
+}
+
+function renderTabellaMultiAnno() {
+  const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort();
+  if (!anni.length) { $('tabelleContent').innerHTML = '<p style="color:var(--text-muted);padding:20px;">Nessun dato disponibile.</p>'; return; }
+
+  // Tabella: righe = mesi, colonne = anni × (Ent, Usc, Gua)
+  const pivots = anni.map(a => ({ anno: a, rows: buildPivotAnno(a) }));
+
+  const headerAnni = anni.map(a => `<th colspan="3" style="text-align:center;border-bottom:1px solid var(--border2)">${a}</th>`).join('');
+  const subHeader  = anni.map(() => `
+    <th style="text-align:right;color:var(--green)">Entrate</th>
+    <th style="text-align:right;color:var(--red)">Uscite</th>
+    <th style="text-align:right;color:var(--accent)">Guadagno</th>
+  `).join('');
+
+  const bodyRows = MESI_NOMI.map((label, m) => {
+    const cols = pivots.map(p => {
+      const r = p.rows[m];
+      return `
+        <td style="text-align:right;color:var(--green);font-variant-numeric:tabular-nums">${r.entrate ? fmt(r.entrate) : '<span style="color:var(--text-dim)">—</span>'}</td>
+        <td style="text-align:right;color:var(--red);font-variant-numeric:tabular-nums">${r.uscite ? fmt(r.uscite) : '<span style="color:var(--text-dim)">—</span>'}</td>
+        <td style="text-align:right;font-variant-numeric:tabular-nums;color:${r.guadagno>=0?'var(--green)':'var(--red)'}">${r.entrate||r.uscite ? fmt(r.guadagno) : '<span style="color:var(--text-dim)">—</span>'}</td>
+      `;
+    }).join('');
+    return `<tr><td style="font-weight:500;white-space:nowrap">${label}</td>${cols}</tr>`;
+  }).join('');
+
+  const totalRow = pivots.map(p => {
+    const totEnt = p.rows.reduce((s,r)=>s+r.entrate,0);
+    const totUsc = p.rows.reduce((s,r)=>s+r.uscite,0);
+    const totGua = totEnt - totUsc;
+    return `
+      <td style="text-align:right;color:var(--green)">${fmt(totEnt)}</td>
+      <td style="text-align:right;color:var(--red)">${fmt(totUsc)}</td>
+      <td style="text-align:right;color:${totGua>=0?'var(--green)':'var(--red)'}">${fmt(totGua)}</td>
+    `;
+  }).join('');
+
+  $('tabelleContent').innerHTML = `
+    <div class="card">
+      <div class="card-title">Riepilogo mensile — Tutti gli anni</div>
+      <div class="table-wrap" style="margin-top:0;overflow-x:auto;">
+        <table class="data-table pivot-table">
+          <thead>
+            <tr>
+              <th rowspan="2">Mese</th>
+              ${headerAnni}
+            </tr>
+            <tr>${subHeader}</tr>
+          </thead>
+          <tbody>${bodyRows}</tbody>
+          <tfoot>
+            <tr class="pivot-total">
+              <td>Totale</td>
+              ${totalRow}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function exportTabelleCsv() {
+  const modalita = $('tabelleModalita').value;
+  const anno     = parseInt($('tabelleAnno').value);
+  let lines = [];
+
+  if (modalita === 'anno') {
+    const pivot = buildPivotAnno(anno);
+    lines.push(['Mese','Entrate','Uscite','Guadagno'].join(','));
+    pivot.forEach(r => lines.push([r.label, r.entrate.toFixed(2), r.uscite.toFixed(2), r.guadagno.toFixed(2)].join(',')));
+    const totEnt = pivot.reduce((s,r)=>s+r.entrate,0);
+    const totUsc = pivot.reduce((s,r)=>s+r.uscite,0);
+    lines.push(['Totale', totEnt.toFixed(2), totUsc.toFixed(2), (totEnt-totUsc).toFixed(2)].join(','));
+  } else {
+    const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort();
+    const header = ['Mese', ...anni.flatMap(a=>[`Entrate ${a}`,`Uscite ${a}`,`Guadagno ${a}`])];
+    lines.push(header.join(','));
+    MESI_NOMI.forEach((label, m) => {
+      const cols = anni.flatMap(a => {
+        const righe = speseData.filter(r => r.data?.getFullYear()===a && r.data?.getMonth()===m);
+        const ent = righe.filter(r=>r.tipo==='Entrate').reduce((s,r)=>s+r.costo,0);
+        const usc = righe.filter(r=>r.tipo==='Uscite').reduce((s,r)=>s+r.costo,0);
+        return [ent.toFixed(2), usc.toFixed(2), (ent-usc).toFixed(2)];
+      });
+      lines.push([label, ...cols].join(','));
+    });
+    const totals = anni.flatMap(a => {
+      const ent = speseData.filter(r=>r.tipo==='Entrate'&&r.data?.getFullYear()===a).reduce((s,r)=>s+r.costo,0);
+      const usc = speseData.filter(r=>r.tipo==='Uscite' &&r.data?.getFullYear()===a).reduce((s,r)=>s+r.costo,0);
+      return [ent.toFixed(2), usc.toFixed(2), (ent-usc).toFixed(2)];
+    });
+    lines.push(['Totale', ...totals].join(','));
+  }
+
+  const csv  = lines.join('\n');
+  const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `tabella_${modalita==='anno'?$('tabelleAnno').value:'tutti_anni'}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── ALLIEVI ───────────────────────────────────────────────
@@ -921,10 +1085,18 @@ function applyAllieviFilters() {
   }).join('');
 }
 
+function setTipoChip(val) {
+  document.querySelectorAll('#aTipoGrid .cat-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.tipo === val);
+  });
+  $('aTipo').value = val || '';
+}
+
 function openNewAllievo() {
   editAllieviIdx = null;
   $('modalAllieviTitle').textContent = 'Nuovo allievo';
-  ['aCognome','aNome','aTipo','aTesseramento','aCellulare','aMail','aIndirizzo','aNote'].forEach(id => { $(id).value=''; });
+  ['aCognome','aNome','aTesseramento','aCellulare','aMail','aIndirizzo','aNote'].forEach(id => { $(id).value=''; });
+  setTipoChip('');
   $('modalAllieviOverlay').style.display = 'flex';
   $('aCognome').focus();
 }
@@ -936,12 +1108,12 @@ function openEditAllievo(idx) {
   $('modalAllieviTitle').textContent = 'Modifica allievo';
   $('aCognome').value      = r.cognome;
   $('aNome').value         = r.nome;
-  $('aTipo').value         = r.tipo;
   $('aTesseramento').value = r.tesseramento;
   $('aCellulare').value    = r.cellulare;
   $('aMail').value         = r.mail;
   $('aIndirizzo').value    = r.indirizzo;
   $('aNote').value         = r.note;
+  setTipoChip(r.tipo);
   $('modalAllieviOverlay').style.display = 'flex';
 }
 
@@ -1115,6 +1287,23 @@ async function init() {
   $('modalAllieviCancel').addEventListener('click', closeAllieviModal);
   $('modalAllieviSave').addEventListener('click', saveAllievo);
   $('modalAllieviOverlay').addEventListener('click', e => { if (e.target === $('modalAllieviOverlay')) closeAllieviModal(); });
+
+  // Allievo tipo chips
+  document.querySelectorAll('#aTipoGrid .cat-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#aTipoGrid .cat-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      $('aTipo').value = chip.dataset.tipo;
+    });
+  });
+
+  // Tabelle filtri
+  $('tabelleModalita').addEventListener('change', () => {
+    $('tabelleAnnoGroup').style.display = $('tabelleModalita').value === 'anno' ? '' : 'none';
+    updateTabelle();
+  });
+  $('tabelleAnno').addEventListener('change', updateTabelle);
+  $('btnTabelleCsv').addEventListener('click', exportTabelleCsv);
 
   // Filtri allievi/iscrizioni live
   $('searchAllievi').addEventListener('input', applyAllieviFilters);
