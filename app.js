@@ -13,6 +13,7 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzIdSBkSIwnAz_P
 
 // Nomi dei fogli
 const SHEET_SPESE     = 'Entrate/Uscite';
+const SHEET_CORSI     = 'Corsi';
 const SHEET_ALLIEVI   = 'Allievi';
 const SHEET_ISCRIZIONI= 'Iscrizioni';
 const SHEET_TABELLE   = 'Tabelle';
@@ -24,6 +25,7 @@ const CAT_ENTRATE = ['Allievi','Sponsor','Versamento','Altro'];
 
 // ── STATO ────────────────────────────────────────────────
 let speseData     = [];   // righe grezze dal foglio (senza header)
+let corsiData     = [];   // dati foglio Corsi
 let allieviData   = [];
 let iscrizioniData= [];
 let tabelleData   = [];
@@ -122,13 +124,23 @@ function getMockData(sheet) {
       ['Romano','Chiara','Romano Chiara','Adulti','2025','333-5678901','chiara@mail.it','Via Venezia 5',''],
     ];
   }
+  if (sheet === SHEET_CORSI) {
+    return [
+      ['Nome corso','Prova','x1','x5','x10'],
+      ['Danza classica', 10, 15, 60, 100],
+      ['Danza moderna',  10, 15, 60, 100],
+      ['Hip hop',        10, 12, 50, 90],
+      ['Pilates',        10, 13, 55, 95],
+      ['Yoga',           10, 12, 50, 90],
+    ];
+  }
   if (sheet === SHEET_ISCRIZIONI) {
     return [
-      ['Allievo','A.S.','Tipo abbonamento','Mesi','Data inizio','Data fine','Pagato','Corsi','N. corsi','Costo','Note'],
-      ['Rossi Giulia','2024/2025','Mensile',1,'2025-09-01','2025-06-30','Sì','Danza classica',1,80,''],
-      ['Bianchi Sara','2024/2025','Annuale',10,'2025-09-01','2025-06-30','Sì','Danza moderna, Hip hop',2,150,''],
-      ['Verdi Elena','2024/2025','Semestrale',6,'2025-01-01','2025-06-30','No','Danza classica',1,80,'Da saldare'],
-      ['Ferrari Lucia','2023/2024','Annuale',10,'2024-09-01','2024-06-30','Sì','Danza classica',1,70,''],
+      ['Allievo','A.S.','Data','Tipo','Corso','Data pagamento','Pagato','Costo','Note'],
+      ['Rossi Giulia','2024/2025','2025-09-01','x1','Danza classica','2025-09-01','Sì',15,''],
+      ['Bianchi Sara','2024/2025','2025-09-01','x10','Danza moderna','2025-09-01','Sì',100,''],
+      ['Verdi Elena','2024/2025','2025-01-10','x5','Hip hop','','No',50,'Da saldare'],
+      ['Ferrari Lucia','2024/2025','2025-09-05','Prova','Pilates','2025-09-05','Sì',10,''],
     ];
   }
   return [['Colonna A','Colonna B'],['Dato 1','Dato 2']];
@@ -169,18 +181,29 @@ async function loadIscrizioni() {
   const rows = await apiGet(SHEET_ISCRIZIONI);
   iscrizioniData = rows.slice(1).map((r, i) => ({
     _idx: i + 2,
-    allievo: r[0] || '',
-    as: r[1] || '',
-    abbonamento: r[2] || '',
-    mesi: r[3] || '',
-    dataInizio: r[4] || '',
-    dataFine: r[5] || '',
-    pagato: r[6] || '',
-    corsi: r[7] || '',
-    nCorsi: r[8] || '',
-    costo: parseNum(r[9]),
-    note: r[10] || '',
+    allievo:      r[0] || '',
+    as:           r[1] || '',
+    data:         r[2] || '',
+    tipo:         r[3] || '',   // Prova | x1 | x5 | x10
+    corso:        r[4] || '',
+    dataPag:      r[5] || '',
+    pagato:       r[6] || '',   // checkbox / Sì/No
+    costo:        parseNum(r[7]),
+    note:         r[8] || '',
   }));
+}
+
+async function loadCorsi() {
+  const rows = await apiGet(SHEET_CORSI);
+  // Header: Nome corso, Prova, x1, x5, x10  (colonne 0-4)
+  corsiData = rows.slice(1).map((r, i) => ({
+    _idx:  i + 2,
+    nome:  r[0] || '',
+    prova: parseNum(r[1]),
+    x1:    parseNum(r[2]),
+    x5:    parseNum(r[3]),
+    x10:   parseNum(r[4]),
+  })).filter(r => r.nome);
 }
 
 async function loadTabelle() {
@@ -1167,9 +1190,20 @@ async function deleteAllievo(idx) {
 }
 
 // ── ISCRIZIONI ────────────────────────────────────────────
+const TIPO_ISC_COLORS = {
+  'Prova': { bg:'rgba(91,192,222,0.12)',  border:'#5bc0de', text:'#5bc0de' },
+  'x1':   { bg:'rgba(201,169,110,0.12)', border:'#c9a96e', text:'#c9a96e' },
+  'x5':   { bg:'rgba(155,89,182,0.12)',  border:'#9b59b6', text:'#9b59b6' },
+  'x10':  { bg:'rgba(92,184,92,0.12)',   border:'#5cb85c', text:'#5cb85c' },
+};
+
+let editIscrizioniIdx = null;
+
 async function renderIscrizioni() {
   $('iscrizioniLoading').style.display=''; $('iscrizioniTableWrap').style.display='none'; $('iscrizioniEmpty').style.display='none';
   if (!iscrizioniData.length) await loadIscrizioni();
+  if (!corsiData.length) await loadCorsi();
+  if (!allieviData.length) await loadAllievi();
   $('iscrizioniLoading').style.display='none';
 
   const anni = [...new Set(iscrizioniData.map(r=>r.as).filter(Boolean))].sort().reverse();
@@ -1179,35 +1213,189 @@ async function renderIscrizioni() {
 }
 
 function applyIscrizioniFilters() {
-  const search = $('searchIscrizioni').value.toLowerCase();
+  const search = ($('searchIscrizioni').value||'').toLowerCase();
   const as     = $('filterAS').value;
-  const filtered = iscrizioniData.filter(r => {
-    if (search && !r.allievo.toLowerCase().includes(search)) return false;
+  const pag    = $('filterPagato').value;
+  let filtered = iscrizioniData.filter(r => {
+    if (search && !r.allievo.toLowerCase().includes(search) && !r.corso.toLowerCase().includes(search)) return false;
     if (as && r.as !== as) return false;
+    if (pag === 'si'  && !isPagato(r.pagato)) return false;
+    if (pag === 'no'  &&  isPagato(r.pagato)) return false;
     return true;
   });
+
+  $('iscrizioniCount').textContent = `${filtered.length} iscrizioni`;
+  const totale = filtered.reduce((s,r)=>s+r.costo,0);
+  $('iscrizioniTotale').textContent = filtered.length ? `Totale: ${fmt(totale)}` : '';
 
   if (!filtered.length) { $('iscrizioniTableWrap').style.display='none'; $('iscrizioniEmpty').style.display=''; return; }
   $('iscrizioniEmpty').style.display='none'; $('iscrizioniTableWrap').style.display='';
 
   $('iscrizioniBody').innerHTML = filtered.map(r => {
-    const pagBadge = r.pagato && r.pagato.toLowerCase().includes('s') ? 'badge-green' : 'badge-red';
-    const pagLabel = r.pagato && r.pagato.toLowerCase().includes('s') ? 'Sì' : 'No';
-    return `
-      <tr>
-        <td>${escHtml(r.allievo)}</td>
-        <td><span class="badge badge-gold">${escHtml(r.as)}</span></td>
-        <td>${escHtml(r.abbonamento)}</td>
-        <td style="text-align:center">${r.mesi}</td>
-        <td>${fmtDate(r.dataInizio)}</td>
-        <td>${fmtDate(r.dataFine)}</td>
-        <td><span class="badge ${pagBadge}">${pagLabel}</span></td>
-        <td style="font-size:12px;color:var(--text-muted)">${escHtml(r.corsi)}</td>
-        <td style="text-align:right">${fmt(r.costo)}</td>
-        <td style="font-size:12px;color:var(--text-muted)">${escHtml(r.note)}</td>
-      </tr>
-    `;
+    const pag  = isPagato(r.pagato);
+    const tc   = TIPO_ISC_COLORS[r.tipo] || { bg:'rgba(255,255,255,0.05)', border:'#555', text:'#888' };
+    const tStyle = `background:${tc.bg};border:1px solid ${tc.border};color:${tc.text};display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:500;`;
+    return `<tr>
+      <td style="font-weight:500">${escHtml(r.allievo)}</td>
+      <td><span class="badge badge-gold">${escHtml(r.as)}</span></td>
+      <td>${fmtDate(r.data)}</td>
+      <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
+      <td>${escHtml(r.corso)}</td>
+      <td>${fmtDate(r.dataPag)}</td>
+      <td>
+        <span class="badge ${pag?'badge-green':'badge-red'}">${pag?'Sì':'No'}</span>
+      </td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${r.costo?fmt(r.costo):'—'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${escHtml(r.note)}</td>
+      <td>
+        <div style="display:flex;gap:4px;">
+          <button class="btn-table" onclick="openEditIscrizione(${r._idx})" title="Modifica">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="btn-table btn-del" onclick="deleteIscrizione(${r._idx})" title="Elimina">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M5 3V2h2v1M4 3v6M8 3v6M3 3l.5 7h5L9 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </td>
+    </tr>`;
   }).join('');
+}
+
+function isPagato(v) {
+  if (!v) return false;
+  const s = String(v).toLowerCase().trim();
+  return s === 'sì' || s === 'si' || s === 'true' || s === '1' || s === 'yes';
+}
+
+// ─ Calcola costo automatico da corso + tipo
+function getCostoCorso(nomeCorso, tipo) {
+  const corso = corsiData.find(c => c.nome === nomeCorso);
+  if (!corso) return 0;
+  const map = { 'Prova': corso.prova, 'x1': corso.x1, 'x5': corso.x5, 'x10': corso.x10 };
+  return map[tipo] || 0;
+}
+
+// ─ Modal iscrizione
+function openNuovaIscrizione() {
+  editIscrizioniIdx = null;
+  $('modalIscTitle').textContent = 'Nuova iscrizione';
+  // reset fields
+  $('iAllievo').value = '';
+  $('iAS').value = currentAnnoScolastico();
+  $('iData').valueAsDate = new Date();
+  $('iDataPag').value = '';
+  $('iPagato').checked = false;
+  $('iNote').value = '';
+  $('iCosto').value = '';
+  setTipoIscChip('');
+  populateCorsiSelect();
+  $('modalIscOverlay').style.display = 'flex';
+  $('iAllievo').focus();
+}
+
+function openEditIscrizione(idx) {
+  const r = iscrizioniData.find(r => r._idx === idx);
+  if (!r) return;
+  editIscrizioniIdx = idx;
+  $('modalIscTitle').textContent = 'Modifica iscrizione';
+  $('iAllievo').value  = r.allievo;
+  $('iAS').value       = r.as;
+  $('iData').value     = r.data ? (r.data instanceof Date ? r.data.toISOString().split('T')[0] : String(r.data)) : '';
+  $('iDataPag').value  = r.dataPag ? (r.dataPag instanceof Date ? r.dataPag.toISOString().split('T')[0] : String(r.dataPag)) : '';
+  $('iPagato').checked = isPagato(r.pagato);
+  $('iNote').value     = r.note;
+  $('iCosto').value    = r.costo || '';
+  setTipoIscChip(r.tipo);
+  populateCorsiSelect(r.corso);
+  $('modalIscOverlay').style.display = 'flex';
+}
+
+function setTipoIscChip(val) {
+  document.querySelectorAll('#iTipoGrid .cat-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.tipo === val);
+  });
+  $('iTipo').value = val || '';
+  autoAggiornaCosto();
+}
+
+function populateCorsiSelect(selected) {
+  const sel = $('iCorso');
+  sel.innerHTML = '<option value="">— seleziona corso —</option>' +
+    corsiData.map(c => `<option value="${c.nome}"${c.nome===selected?' selected':''}>${c.nome}</option>`).join('');
+  autoAggiornaCosto();
+}
+
+function autoAggiornaCosto() {
+  const corso = $('iCorso') ? $('iCorso').value : '';
+  const tipo  = $('iTipo') ? $('iTipo').value : '';
+  if (corso && tipo) {
+    const costo = getCostoCorso(corso, tipo);
+    if (costo) $('iCosto').value = costo;
+  }
+}
+
+function populateAllieviDatalist() {
+  const dl = $('allieviList');
+  if (!dl) return;
+  dl.innerHTML = allieviData
+    .map(a => `<option value="${escHtml(a.nomeCompleto)}">`)
+    .join('');
+}
+
+function currentAnnoScolastico() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-based
+  return m >= 8 ? `${y}/${y+1}` : `${y-1}/${y}`;
+}
+
+function closeIscModal() { $('modalIscOverlay').style.display = 'none'; editIscrizioniIdx = null; }
+
+async function saveIscrizione() {
+  const allievo = $('iAllievo').value.trim();
+  const as      = $('iAS').value.trim();
+  const data    = $('iData').value;
+  const tipo    = $('iTipo').value;
+  const corso   = $('iCorso').value;
+  const dataPag = $('iDataPag').value;
+  const pagato  = $('iPagato').checked ? 'Sì' : 'No';
+  const costo   = parseFloat($('iCosto').value) || 0;
+  const note    = $('iNote').value.trim();
+
+  if (!allievo) return alert('Seleziona un allievo.');
+  if (!tipo)    return alert('Seleziona il tipo.');
+  if (!corso)   return alert('Seleziona un corso.');
+
+  const row = [allievo, as, data, tipo, corso, dataPag, pagato, costo, note];
+  const obj = { _idx: editIscrizioniIdx||0, allievo, as, data, tipo, corso, dataPag, pagato, costo, note };
+
+  if (editIscrizioniIdx === null) {
+    const res = await apiPost({ action: 'append', sheet: SHEET_ISCRIZIONI, row });
+    if (res.ok !== false) {
+      obj._idx = iscrizioniData.length + 2;
+      iscrizioniData.push(obj);
+      closeIscModal(); applyIscrizioniFilters();
+    }
+  } else {
+    const res = await apiPost({ action: 'update', sheet: SHEET_ISCRIZIONI, rowIndex: editIscrizioniIdx, row });
+    if (res.ok !== false) {
+      const r = iscrizioniData.find(r => r._idx === editIscrizioniIdx);
+      if (r) Object.assign(r, obj);
+      closeIscModal(); applyIscrizioniFilters();
+    }
+  }
+}
+
+async function deleteIscrizione(idx) {
+  const r = iscrizioniData.find(r => r._idx === idx);
+  if (!r) return;
+  if (!confirm(`Eliminare l'iscrizione di "${r.allievo}" — ${r.corso} (${r.tipo})?
+L'operazione non può essere annullata.`)) return;
+  const res = await apiPost({ action: 'delete', sheet: SHEET_ISCRIZIONI, rowIndex: idx });
+  if (res.ok !== false) {
+    iscrizioniData = iscrizioniData.filter(r => r._idx !== idx);
+    applyIscrizioniFilters();
+  }
 }
 
 // ── CHART CONFIG ──────────────────────────────────────────
@@ -1342,11 +1530,45 @@ async function init() {
   $('tabelleAnno').addEventListener('change', updateTabelle);
   $('btnTabelleCsv').addEventListener('click', exportTabelleCsv);
 
-  // Filtri allievi/iscrizioni live
+  // Filtri allievi live
   $('searchAllievi').addEventListener('input', applyAllieviFilters);
   $('filterTipoAllievo').addEventListener('change', applyAllieviFilters);
+
+  // Filtri iscrizioni live
   $('searchIscrizioni').addEventListener('input', applyIscrizioniFilters);
   $('filterAS').addEventListener('change', applyIscrizioniFilters);
+  $('filterPagato').addEventListener('change', applyIscrizioniFilters);
+  $('btnClearIscFiltri').addEventListener('click', () => {
+    $('searchIscrizioni').value = '';
+    $('filterAS').value = '';
+    $('filterPagato').value = '';
+    applyIscrizioniFilters();
+  });
+
+  // Modal iscrizione
+  $('btnNuovaIscrizione').addEventListener('click', async () => {
+    if (!corsiData.length) await loadCorsi();
+    if (!allieviData.length) await loadAllievi();
+    populateAllieviDatalist();
+    openNuovaIscrizione();
+  });
+  $('modalIscClose').addEventListener('click', closeIscModal);
+  $('modalIscCancel').addEventListener('click', closeIscModal);
+  $('modalIscSave').addEventListener('click', saveIscrizione);
+  $('modalIscOverlay').addEventListener('click', e => { if (e.target === $('modalIscOverlay')) closeIscModal(); });
+
+  // Tipo iscrizione chips
+  document.querySelectorAll('#iTipoGrid .cat-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#iTipoGrid .cat-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      $('iTipo').value = chip.dataset.tipo;
+      autoAggiornaCosto();
+    });
+  });
+
+  // Auto-aggiorna costo quando cambia corso
+  $('iCorso').addEventListener('change', autoAggiornaCosto);
 
   // Init elenco filtri
   initElencoFilters();
@@ -1356,6 +1578,7 @@ async function init() {
   // Carica dati principali
   await loadSpese();
   await loadAllievi();
+  await loadCorsi();
 
   // Mostra dashboard
   showSection('dashboard');
