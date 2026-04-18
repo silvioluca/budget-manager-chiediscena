@@ -29,6 +29,7 @@ let corsiData     = [];   // dati foglio Corsi
 let allieviData   = [];
 let iscrizioniData= [];
 let tabelleData   = [];
+let presenzeData  = [];   // dati foglio Presenze
 
 let currentType   = 'Uscite';
 let currentCat    = '';
@@ -143,6 +144,20 @@ function getMockData(sheet) {
       ['Ferrari Lucia','2024/2025','2025-09-05','Prova','Pilates','2025-09-05','Sì',10,''],
     ];
   }
+  if (sheet === SHEET_PRESENZE) {
+    return [
+      ['Giorno','Corso','Allievi presenti'],
+      ['2025-04-07','Danza classica','Rossi Giulia,Bianchi Sara,Verdi Elena'],
+      ['2025-04-07','Hip hop','Verdi Elena,Romano Chiara'],
+      ['2025-04-09','Danza moderna','Bianchi Sara,Romano Chiara'],
+      ['2025-04-14','Danza classica','Rossi Giulia,Ferrari Lucia'],
+      ['2025-04-14','Pilates','Ferrari Lucia,Bianchi Sara'],
+      ['2025-04-16','Hip hop','Verdi Elena'],
+      ['2025-04-02','Danza classica','Rossi Giulia,Bianchi Sara'],
+      ['2025-03-26','Danza classica','Rossi Giulia,Bianchi Sara,Ferrari Lucia'],
+      ['2025-03-24','Danza moderna','Bianchi Sara'],
+    ];
+  }
   return [['Colonna A','Colonna B'],['Dato 1','Dato 2']];
 }
 
@@ -211,8 +226,20 @@ async function loadTabelle() {
   tabelleData = rows;
 }
 
+async function loadPresenze() {
+  const rows = await apiGet(SHEET_PRESENZE);
+  // Struttura: Giorno, Corso, Allievi presenti (separati da virgola)
+  presenzeData = rows.slice(1).map((r, i) => ({
+    _idx:    i + 2,
+    giorno:  r[0] || '',
+    corso:   r[1] || '',
+    allievi: r[2] ? String(r[2]).split(',').map(s => s.trim()).filter(Boolean) : [],
+    note:    r[3] || '',
+  })).filter(r => r.giorno && r.corso);
+}
+
 // ── NAVIGAZIONE ──────────────────────────────────────────
-const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','iscrizioni'];
+const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','iscrizioni','presenze'];
 
 function showSection(name) {
   sections.forEach(s => {
@@ -230,6 +257,7 @@ function showSection(name) {
   if (name === 'tabelle')     renderTabelle();
   if (name === 'allievi')     renderAllievi();
   if (name === 'iscrizioni')  renderIscrizioni();
+  if (name === 'presenze')     renderPresenze();
 
   // Mobile: chiudi sidebar
   if (window.innerWidth <= 768) {
@@ -1398,6 +1426,398 @@ L'operazione non può essere annullata.`)) return;
   }
 }
 
+
+// ── PRESENZE ─────────────────────────────────────────────
+let presView        = 'calendario';
+let presCalYear     = new Date().getFullYear();
+let presCalMonth    = new Date().getMonth(); // 0-based
+let editPresIdx     = null;
+let presExtraAllievi= []; // allievi aggiunti extra nella modal
+
+async function renderPresenze() {
+  if (!presenzeData.length) await loadPresenze();
+  if (!corsiData.length)    await loadCorsi();
+  if (!allieviData.length)  await loadAllievi();
+
+  // Popola filtro corso
+  const corsi = [...new Set(presenzeData.map(r=>r.corso).filter(Boolean))].sort();
+  const fCorso = document.getElementById('presFiltroCorso');
+  const prevCorso = fCorso.value;
+  fCorso.innerHTML = '<option value="">Tutti i corsi</option>' +
+    corsi.map(c=>`<option value="${escHtml(c)}"${c===prevCorso?' selected':''}>${escHtml(c)}</option>`).join('');
+
+  // Default filtro mese = mese corrente
+  const fMese = document.getElementById('presFiltroMese');
+  if (!fMese.value) {
+    const now = new Date();
+    fMese.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+
+  renderPresView();
+}
+
+function renderPresView() {
+  const view = presView;
+  const el   = document.getElementById('presView');
+  if (!el) return;
+  if (view === 'calendario') renderPresCalendario(el);
+  else if (view === 'elenco') renderPresElenco(el);
+  else if (view === 'corso')  renderPresCorsо(el);
+  else if (view === 'allievo') renderPresAllievo(el);
+}
+
+function filteredPresenze() {
+  const filtroCorso = (document.getElementById('presFiltroCorso')||{}).value || '';
+  const filtroMese  = (document.getElementById('presFiltroMese')||{}).value  || '';
+  return presenzeData.filter(r => {
+    if (filtroCorso && r.corso !== filtroCorso) return false;
+    if (filtroMese) {
+      const [fy, fm] = filtroMese.split('-');
+      const d = new Date(r.giorno);
+      if (isNaN(d)) return true;
+      if (d.getFullYear() !== parseInt(fy) || d.getMonth()+1 !== parseInt(fm)) return false;
+    }
+    return true;
+  });
+}
+
+// ── VISTA CALENDARIO ──────────────────────────────────────
+function renderPresCalendario(el) {
+  const filtroMese = (document.getElementById('presFiltroMese')||{}).value || '';
+  let y = presCalYear, m = presCalMonth;
+  if (filtroMese) {
+    const [fy,fm] = filtroMese.split('-');
+    y = parseInt(fy); m = parseInt(fm)-1;
+    presCalYear = y; presCalMonth = m;
+  }
+
+  const firstDay = new Date(y, m, 1).getDay(); // 0=dom
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const startOffset = (firstDay + 6) % 7; // lun=0
+  const monthLabel = new Date(y, m, 1).toLocaleDateString('it-IT', {month:'long', year:'numeric'});
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Mappa giorno → presenze
+  const byDay = {};
+  filteredPresenze().forEach(r => {
+    const d = new Date(r.giorno);
+    if (isNaN(d)) return;
+    if (d.getFullYear()===y && d.getMonth()===m) {
+      const k = d.getDate();
+      if (!byDay[k]) byDay[k] = [];
+      byDay[k].push(r);
+    }
+  });
+
+  const giorni = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+  let cells = '';
+  for (let i=0; i<startOffset; i++) cells += `<div class="pres-cal-day pres-cal-empty"></div>`;
+  for (let d=1; d<=daysInMonth; d++) {
+    const dt = new Date(y, m, d);
+    const isToday = dt.getTime() === today.getTime();
+    const records = byDay[d] || [];
+    const pills   = records.map(r =>
+      `<div class="pres-cal-pill" title="${escHtml(r.corso)}: ${escHtml(r.allievi.join(', '))}">${escHtml(r.corso)}</div>`
+    ).join('');
+    cells += `<div class="pres-cal-day${isToday?' pres-cal-today':''}${records.length?' pres-cal-has-data':''}"
+      onclick="openPresForDay('${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}', null)">
+      <div class="pres-cal-day-num">${d}</div>
+      <div class="pres-cal-dot">${pills}</div>
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div class="pres-cal-nav">
+      <button class="pres-cal-btn" id="calPrev">&#8249;</button>
+      <div class="pres-cal-nav-title">${monthLabel.charAt(0).toUpperCase()+monthLabel.slice(1)}</div>
+      <button class="pres-cal-btn" id="calNext">&#8250;</button>
+    </div>
+    <div class="pres-cal-grid">
+      ${giorni.map(g=>`<div class="pres-cal-head">${g}</div>`).join('')}
+      ${cells}
+    </div>`;
+
+  document.getElementById('calPrev').onclick = () => {
+    presCalMonth--; if (presCalMonth<0) { presCalMonth=11; presCalYear--; }
+    const fMese = document.getElementById('presFiltroMese');
+    fMese.value = `${presCalYear}-${String(presCalMonth+1).padStart(2,'0')}`;
+    renderPresView();
+  };
+  document.getElementById('calNext').onclick = () => {
+    presCalMonth++; if (presCalMonth>11) { presCalMonth=0; presCalYear++; }
+    const fMese = document.getElementById('presFiltroMese');
+    fMese.value = `${presCalYear}-${String(presCalMonth+1).padStart(2,'0')}`;
+    renderPresView();
+  };
+}
+
+// ── VISTA ELENCO ──────────────────────────────────────────
+function renderPresElenco(el) {
+  const data = filteredPresenze().sort((a,b) => new Date(b.giorno)-new Date(a.giorno));
+  if (!data.length) { el.innerHTML = '<div class="table-empty">Nessuna presenza nel periodo selezionato.</div>'; return; }
+
+  el.innerHTML = `
+    <div class="table-wrap">
+      ${data.map(r => `
+        <div class="pres-elenco-row">
+          <div class="pres-elenco-date">${fmtDate(r.giorno)}</div>
+          <div class="pres-elenco-corso">${escHtml(r.corso)}</div>
+          <div class="pres-elenco-allievi">
+            ${r.allievi.map(a=>`<span class="pres-allievo-chip">${escHtml(a)}</span>`).join('')}
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-left:auto;white-space:nowrap;">${r.allievi.length} pres.</div>
+          <div class="pres-elenco-actions" style="display:flex;gap:4px;margin-left:10px;">
+            <button class="btn-table" onclick="openEditPresenza(${r._idx})" title="Modifica">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="btn-table btn-del" onclick="deletePresenza(${r._idx})" title="Elimina">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M5 3V2h2v1M4 3v6M8 3v6M3 3l.5 7h5L9 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── VISTA PER CORSO ───────────────────────────────────────
+function renderPresCorsо(el) {
+  const data = filteredPresenze();
+  const corsiMap = {};
+  data.forEach(r => {
+    if (!corsiMap[r.corso]) corsiMap[r.corso] = [];
+    corsiMap[r.corso].push(r);
+  });
+  if (!Object.keys(corsiMap).length) { el.innerHTML = '<div class="table-empty">Nessuna presenza nel periodo.</div>'; return; }
+
+  el.innerHTML = Object.entries(corsiMap).sort().map(([corso, records]) => {
+    const tuttiAllievi = {};
+    records.forEach(r => r.allievi.forEach(a => { tuttiAllievi[a] = (tuttiAllievi[a]||0)+1; }));
+    const allieviRanked = Object.entries(tuttiAllievi).sort((a,b)=>b[1]-a[1]);
+    const totLezioni = records.length;
+
+    return `
+      <div class="card pres-corso-card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <div style="font-size:15px;font-weight:500;flex:1;">${escHtml(corso)}</div>
+          <span class="badge badge-gold">${totLezioni} lez.</span>
+          <span class="badge badge-gray">${allieviRanked.length} allievi</span>
+        </div>
+        <div class="pres-allievo-grid">
+          ${allieviRanked.map(([nome,count]) => `
+            <div class="pres-allievo-row">
+              <div class="pres-allievo-nome">${escHtml(nome)}</div>
+              <div class="pres-allievo-count">${count}/${totLezioni} pres.</div>
+              <div class="pres-heat-bar-wrap">
+                <div class="pres-heat-bar" style="width:${Math.round(count/totLezioni*100)}%"></div>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-left:8px;width:32px;text-align:right;">${Math.round(count/totLezioni*100)}%</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── VISTA PER ALLIEVO ─────────────────────────────────────
+function renderPresAllievo(el) {
+  const data = filteredPresenze();
+  if (!data.length) { el.innerHTML = '<div class="table-empty">Nessuna presenza nel periodo.</div>'; return; }
+
+  // Conta presenze per allievo
+  const allieviMap = {};
+  data.forEach(r => r.allievi.forEach(a => {
+    if (!allieviMap[a]) allieviMap[a] = { count: 0, corsi: {} };
+    allieviMap[a].count++;
+    allieviMap[a].corsi[r.corso] = (allieviMap[a].corsi[r.corso]||0)+1;
+  }));
+  const sorted = Object.entries(allieviMap).sort((a,b)=>b[1].count-a[1].count);
+  const maxCount = sorted[0]?.[1]?.count || 1;
+  const totLezioni = data.length;
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Presenze per allievo — ${data.length} lezioni registrate</div>
+      <div class="pres-allievo-grid">
+        ${sorted.map(([nome, info]) => {
+          const corsiStr = Object.entries(info.corsi).map(([c,n])=>`${c} (${n})`).join(' · ');
+          return `
+            <div class="pres-allievo-row">
+              <div class="pres-allievo-nome">${escHtml(nome)}</div>
+              <div class="pres-allievo-count">${info.count} pres.</div>
+              <div class="pres-heat-bar-wrap">
+                <div class="pres-heat-bar" style="width:${Math.round(info.count/maxCount*100)}%"></div>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);flex:2;padding-left:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${escHtml(corsiStr)}</div>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+// ── MODAL PRESENZA ────────────────────────────────────────
+function openPresForDay(giorno, corso) {
+  editPresIdx     = null;
+  presExtraAllievi= [];
+  document.getElementById('modalPresTitle').textContent = 'Registra presenza';
+  document.getElementById('pGiorno').value = giorno || new Date().toISOString().split('T')[0];
+  document.getElementById('pNote').value   = '';
+  populatePCorso(corso);
+  renderPresChecklist([]);
+  document.getElementById('presExtraList').innerHTML = '';
+  document.getElementById('pExtraAllievo').value = '';
+  document.getElementById('modalPresOverlay').style.display = 'flex';
+}
+
+function openNuovaPresenza() {
+  openPresForDay(new Date().toISOString().split('T')[0], null);
+}
+
+function openEditPresenza(idx) {
+  const r = presenzeData.find(r => r._idx === idx);
+  if (!r) return;
+  editPresIdx     = idx;
+  presExtraAllievi= [];
+  document.getElementById('modalPresTitle').textContent = 'Modifica presenza';
+  document.getElementById('pGiorno').value = r.giorno;
+  document.getElementById('pNote').value   = r.note || '';
+  populatePCorso(r.corso);
+  renderPresChecklist(r.allievi);
+  document.getElementById('presExtraList').innerHTML = '';
+  document.getElementById('pExtraAllievo').value = '';
+  document.getElementById('modalPresOverlay').style.display = 'flex';
+}
+
+function populatePCorso(selected) {
+  const sel = document.getElementById('pCorso');
+  sel.innerHTML = '<option value="">\u2014 seleziona \u2014</option>' +
+    corsiData.map(c=>`<option value="${escHtml(c.nome)}"${c.nome===selected?' selected':''}>${escHtml(c.nome)}</option>`).join('');
+  if (selected) renderPresChecklist(editPresIdx ? (presenzeData.find(r=>r._idx===editPresIdx)||{}).allievi||[] : []);
+  sel.onchange = () => renderPresChecklist(editPresIdx ? (presenzeData.find(r=>r._idx===editPresIdx)||{}).allievi||[] : []);
+}
+
+function getAllieviForCorso(nomeCorso) {
+  // Allievi iscritti a quel corso
+  const iscr = iscrizioniData.filter(r => r.corso === nomeCorso).map(r => r.allievo);
+  // Aggiungi tutti gli allievi noti (union) ordinati
+  const tutti = [...new Set([...iscr, ...allieviData.map(a=>a.nomeCompleto)])].sort((a,b)=>a.localeCompare(b,'it'));
+  return { iscritti: new Set(iscr), tutti };
+}
+
+function renderPresChecklist(checked) {
+  const nomeCorso = document.getElementById('pCorso').value;
+  const list      = document.getElementById('presAllieviList');
+  const countEl   = document.getElementById('presConteggioLabel');
+  if (!nomeCorso) { list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Seleziona prima un corso</div>'; return; }
+
+  const { iscritti, tutti } = getAllieviForCorso(nomeCorso);
+  const checkedSet = new Set(checked);
+
+  list.innerHTML = tutti.map(nome => {
+    const isIsc = iscritti.has(nome);
+    const isCk  = checkedSet.has(nome);
+    return `<label class="pres-check-item${isCk?' checked':''}" data-nome="${escHtml(nome)}">
+      <input type="checkbox" ${isCk?'checked':''} onchange="onPresCheck(this)">
+      <span class="pres-check-name">${escHtml(nome)}</span>
+      ${isIsc ? '<span style="font-size:10px;color:var(--accent);">iscritto</span>' : ''}
+    </label>`;
+  }).join('');
+
+  updatePresConteggio();
+}
+
+function onPresCheck(cb) {
+  const item = cb.closest('.pres-check-item');
+  item.classList.toggle('checked', cb.checked);
+  updatePresConteggio();
+}
+
+function updatePresConteggio() {
+  const count = document.querySelectorAll('#presAllieviList input[type=checkbox]:checked').length
+              + presExtraAllievi.length;
+  document.getElementById('presConteggioLabel').textContent = count ? `(${count} presenti)` : '';
+}
+
+function addPresExtra() {
+  const val = document.getElementById('pExtraAllievo').value.trim();
+  if (!val) return;
+  if (presExtraAllievi.includes(val)) { document.getElementById('pExtraAllievo').value=''; return; }
+  // Check non già in checklist
+  const inList = [...document.querySelectorAll('#presAllieviList .pres-check-item')]
+    .some(el => el.dataset.nome === val);
+  if (inList) {
+    // Spunta il checkbox esistente
+    const cb = [...document.querySelectorAll('#presAllieviList .pres-check-item')]
+      .find(el => el.dataset.nome === val)?.querySelector('input');
+    if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+    document.getElementById('pExtraAllievo').value=''; return;
+  }
+  presExtraAllievi.push(val);
+  renderExtraChips();
+  document.getElementById('pExtraAllievo').value = '';
+  updatePresConteggio();
+}
+
+function removePresExtra(nome) {
+  presExtraAllievi = presExtraAllievi.filter(n=>n!==nome);
+  renderExtraChips();
+  updatePresConteggio();
+}
+
+function renderExtraChips() {
+  document.getElementById('presExtraList').innerHTML = presExtraAllievi.map(nome =>
+    `<span class="pres-extra-chip">${escHtml(nome)}
+      <button onclick="removePresExtra('${escHtml(nome)}')">\u00d7</button>
+    </span>`
+  ).join('');
+}
+
+function closePresModal() {
+  document.getElementById('modalPresOverlay').style.display = 'none';
+  editPresIdx = null; presExtraAllievi = [];
+}
+
+async function savePresenza() {
+  const giorno = document.getElementById('pGiorno').value;
+  const corso  = document.getElementById('pCorso').value;
+  const note   = document.getElementById('pNote').value.trim();
+  if (!giorno) return alert('Inserisci la data.');
+  if (!corso)  return alert('Seleziona un corso.');
+
+  const fromList = [...document.querySelectorAll('#presAllieviList input[type=checkbox]:checked')]
+    .map(cb => cb.closest('.pres-check-item').dataset.nome);
+  const allPresenti = [...new Set([...fromList, ...presExtraAllievi])].sort((a,b)=>a.localeCompare(b,'it'));
+  const allieviStr  = allPresenti.join(',');
+
+  const row = [giorno, corso, allieviStr, note];
+  const obj = { giorno, corso, allievi: allPresenti, note };
+
+  if (editPresIdx === null) {
+    const res = await apiPost({ action: 'append', sheet: SHEET_PRESENZE, row });
+    if (res.ok !== false) {
+      obj._idx = presenzeData.length + 2;
+      presenzeData.push(obj);
+      closePresModal(); renderPresView();
+    }
+  } else {
+    const res = await apiPost({ action: 'update', sheet: SHEET_PRESENZE, rowIndex: editPresIdx, row });
+    if (res.ok !== false) {
+      const r = presenzeData.find(r=>r._idx===editPresIdx);
+      if (r) Object.assign(r, obj);
+      closePresModal(); renderPresView();
+    }
+  }
+}
+
+async function deletePresenza(idx) {
+  const r = presenzeData.find(r=>r._idx===idx);
+  if (!r) return;
+  if (!confirm(`Eliminare la presenza del ${fmtDate(r.giorno)} — ${r.corso}?`)) return;
+  const res = await apiPost({ action:'delete', sheet:SHEET_PRESENZE, rowIndex:idx });
+  if (res.ok !== false) {
+    presenzeData = presenzeData.filter(r=>r._idx!==idx);
+    renderPresView();
+  }
+}
+
+
 // ── CHART CONFIG ──────────────────────────────────────────
 function chartOpts() {
   return {
@@ -1520,6 +1940,39 @@ async function init() {
       chip.classList.add('active');
       $('aTipo').value = chip.dataset.tipo;
     });
+  });
+
+  // Presenze
+  $('btnNuovaPresenza').addEventListener('click', async () => {
+    if (!corsiData.length)  await loadCorsi();
+    if (!allieviData.length) await loadAllievi();
+    if (!iscrizioniData.length) await loadIscrizioni();
+    populateAllieviDatalist();
+    openNuovaPresenza();
+  });
+  $('modalPresClose').addEventListener('click', closePresModal);
+  $('modalPresCancel').addEventListener('click', closePresModal);
+  $('modalPresSave').addEventListener('click', savePresenza);
+  $('modalPresOverlay').addEventListener('click', e => { if (e.target === $('modalPresOverlay')) closePresModal(); });
+  $('btnPresAddExtra').addEventListener('click', addPresExtra);
+  $('pExtraAllievo').addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); addPresExtra(); } });
+
+  // Presenze view switcher
+  document.querySelectorAll('.pres-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pres-view-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      presView = btn.dataset.view;
+      renderPresView();
+    });
+  });
+
+  // Presenze filtri
+  $('presFiltroCorso').addEventListener('change', renderPresView);
+  $('presFiltroMese').addEventListener('change', () => {
+    const [y,m] = ($('presFiltroMese').value||'').split('-');
+    if (y && m) { presCalYear = parseInt(y); presCalMonth = parseInt(m)-1; }
+    renderPresView();
   });
 
   // Tabelle filtri
