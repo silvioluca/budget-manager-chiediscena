@@ -670,3 +670,190 @@ body.light .pivot-table tfoot td,
 body.light .pivot-total td {
   background: var(--surface2);
 }
+
+/* ─── PRESENZE ───────────────────────────────────────── */
+.pres-view-switch {
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+.pres-view-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px;
+  border-radius: 7px; border: none;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.pres-view-btn:hover { color: var(--text); background: var(--surface2); }
+.pres-view-btn.active { background: var(--accent-dim); color: var(--accent); }
+
+/* Calendario */
+.pres-cal-nav {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 14px;
+}
+.pres-cal-nav-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 20px; font-weight: 400;
+  flex: 1; text-align: center;
+}
+.pres-cal-btn {
+  width: 32px; height: 32px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: transparent; color: var(--text-muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: var(--transition);
+}
+.pres-cal-btn:hover { border-color: var(--border2); color: var(--text); }
+
+.pres-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.pres-cal-head {
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-dim); text-align: center;
+  padding: 6px 0;
+}
+.pres-cal-day {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 6px;
+  min-height: 72px;
+  cursor: pointer;
+  transition: var(--transition);
+  position: relative;
+}
+.pres-cal-day:hover { border-color: var(--border2); background: var(--surface2); }
+.pres-cal-day.pres-cal-empty { background: transparent; border-color: transparent; cursor: default; }
+.pres-cal-day.pres-cal-today { border-color: var(--accent); }
+.pres-cal-day.pres-cal-has-data { background: var(--surface2); }
+.pres-cal-day-num {
+  font-size: 12px; font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.pres-cal-day.pres-cal-today .pres-cal-day-num {
+  color: var(--accent); font-weight: 600;
+}
+.pres-cal-dot {
+  display: flex; flex-wrap: wrap; gap: 3px;
+}
+.pres-cal-pill {
+  font-size: 10px; line-height: 1.2;
+  padding: 2px 6px; border-radius: 99px;
+  background: var(--accent-dim); color: var(--accent);
+  white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 100%;
+}
+
+/* Elenco presenze */
+.pres-elenco-row {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.pres-elenco-row:last-child { border-bottom: none; }
+.pres-elenco-row:hover { background: var(--surface2); }
+.pres-elenco-date {
+  flex-shrink: 0; width: 80px;
+  font-size: 12px; color: var(--text-muted);
+  font-weight: 500;
+}
+.pres-elenco-corso {
+  font-size: 12px; font-weight: 600;
+  color: var(--accent); width: 140px; flex-shrink: 0;
+}
+.pres-elenco-allievi {
+  flex: 1; display: flex; flex-wrap: wrap; gap: 5px;
+}
+.pres-allievo-chip {
+  font-size: 11px; padding: 3px 8px;
+  border-radius: 99px; border: 1px solid var(--border2);
+  color: var(--text-muted); background: transparent;
+}
+.pres-elenco-actions { flex-shrink: 0; }
+
+/* Per corso */
+.pres-corso-card { margin-bottom: 12px; }
+.pres-corso-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.pres-corso-name {
+  font-size: 14px; font-weight: 500; flex: 1;
+}
+.pres-corso-stats {
+  font-size: 12px; color: var(--text-muted);
+}
+
+/* Checklist modal */
+.pres-checklist {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 260px; overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 9px; padding: 8px;
+}
+.pres-check-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: 7px;
+  cursor: pointer; transition: background var(--transition);
+  user-select: none;
+}
+.pres-check-item:hover { background: var(--surface); }
+.pres-check-item.checked { background: var(--green-dim); }
+.pres-check-item input[type=checkbox] {
+  width: 15px; height: 15px;
+  accent-color: var(--green); cursor: pointer; flex-shrink: 0;
+}
+.pres-check-name { font-size: 13px; color: var(--text); flex: 1; }
+.pres-extra-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 99px;
+  background: var(--accent-dim); border: 1px solid rgba(201,169,110,0.25);
+  color: var(--accent); font-size: 12px;
+}
+.pres-extra-chip button {
+  border: none; background: transparent; color: var(--accent);
+  cursor: pointer; padding: 0; line-height: 1; font-size: 12px;
+}
+
+/* Per allievo heatmap */
+.pres-allievo-grid {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pres-allievo-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.pres-allievo-row:hover { background: var(--surface2); }
+.pres-allievo-row:last-child { border-bottom: none; }
+.pres-allievo-nome { width: 160px; font-size: 13px; font-weight: 500; flex-shrink: 0; }
+.pres-allievo-count {
+  font-size: 11px; color: var(--text-muted);
+  width: 70px; flex-shrink: 0;
+}
+.pres-heat-bar-wrap {
+  flex: 1; height: 6px; background: var(--border);
+  border-radius: 99px; overflow: hidden;
+}
+.pres-heat-bar {
+  height: 100%; border-radius: 99px;
+  background: var(--accent);
+  transition: width 0.5s ease;
+}
