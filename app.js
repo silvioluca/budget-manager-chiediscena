@@ -1,17 +1,10 @@
 /* ═══════════════════════════════════════════════════════
    DANZA DASHBOARD — app.js
-   Struttura foglio Google:
-   - Entrate/Uscite: Data, Costo, Descrizione, Categoria, Tipo, Pagamento
-   - Allievi: Cognome, Nome, Nome completo, Tipo, Tesseramento, Cellulare, Mail, Indirizzo, Note
-   - Iscrizioni: Allievo, A.S., Tipo abbonamento, Mesi, Data inizio, Data fine, Pagato, Corsi, N. corsi, Costo, Note
-   - Presenze: Giorno, Corso, Allievi presenti
    ═══════════════════════════════════════════════════════ */
 
 // ── CONFIGURAZIONE ───────────────────────────────────────
-// Sostituisci con l'URL del tuo Google Apps Script deployato
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzIdSBkSIwnAz_PytrLHdgOMRPjNt7Iqz75dTK-m57AyvRdtuumdxlq8DxykCR9uTCGHg/exec';
 
-// Nomi dei fogli
 const SHEET_SPESE     = 'Entrate/Uscite';
 const SHEET_CORSI     = 'Corsi';
 const SHEET_ALLIEVI   = 'Allievi';
@@ -19,22 +12,21 @@ const SHEET_ISCRIZIONI= 'Iscrizioni';
 const SHEET_TABELLE   = 'Tabelle';
 const SHEET_PRESENZE  = 'Presenze';
 
-// Categorie
 const CAT_USCITE  = ['Affitto','Arredamento','Bollette','Cibo','Contributo collaboratore','Contributo team','Corsi di aggiornamento','Manutenzione','Strumenti','Utilità','Tasse','Trasporti','Versamento','Altro'];
 const CAT_ENTRATE = ['Allievi','Sponsor','Versamento','Altro'];
 
 // ── STATO ────────────────────────────────────────────────
-let speseData     = [];   // righe grezze dal foglio (senza header)
-let corsiData     = [];   // dati foglio Corsi
+let speseData     = [];
+let corsiData     = [];
 let allieviData   = [];
 let iscrizioniData= [];
 let tabelleData   = [];
-let presenzeData  = [];   // dati foglio Presenze
+let presenzeData  = [];
 
 let currentType   = 'Uscite';
 let currentCat    = '';
 let currentPag    = '';
-let editRowIndex  = null; // indice 1-based nel foglio
+let editRowIndex  = null;
 
 let chartDash      = null;
 let chartCatDash   = null;
@@ -73,7 +65,7 @@ async function apiGet(sheet) {
   const url = `${APPS_SCRIPT_URL}?sheet=${encodeURIComponent(sheet)}`;
   const res  = await fetch(url);
   const data = await res.json();
-  return data; // array di array
+  return data;
 }
 
 async function apiPost(payload) {
@@ -88,7 +80,7 @@ async function apiPost(payload) {
   return res.json();
 }
 
-// ── MOCK DATA (per anteprima senza Apps Script) ───────────
+// ── MOCK DATA ─────────────────────────────────────────────
 function getMockData(sheet) {
   if (sheet === SHEET_SPESE) {
     return [
@@ -164,9 +156,8 @@ function getMockData(sheet) {
 // ── CARICAMENTO DATI ─────────────────────────────────────
 async function loadSpese() {
   const rows = await apiGet(SHEET_SPESE);
-  // Salta la prima riga (header)
   speseData = rows.slice(1).map((r, i) => ({
-    _idx: i + 2, // indice 1-based nel foglio (riga 1 = header)
+    _idx: i + 2,
     data: parseDate(r[0]),
     costo: parseNum(r[1]),
     descrizione: r[2] || '',
@@ -196,23 +187,22 @@ async function loadIscrizioni() {
   const rows = await apiGet(SHEET_ISCRIZIONI);
   iscrizioniData = rows.slice(1).map((r, i) => ({
     _idx: i + 2,
-    allievo:      r[0] || '',
-    as:           r[1] || '',
-    data:         r[2] || '',
-    tipo:         r[3] || '',   // Prova | x1 | x5 | x10
-    corso:        r[4] || '',
-    dataPag:      r[5] || '',
-    pagato:       r[6] || '',   // checkbox / Sì/No
-    costo:        parseNum(r[7]),
-    note:         r[8] || '',
+    allievo:  r[0] || '',
+    as:       r[1] || '',
+    data:     r[2] || '',
+    tipo:     r[3] || '',
+    corso:    r[4] || '',
+    dataPag:  r[5] || '',
+    pagato:   r[6] || '',
+    costo:    parseNum(r[7]),
+    note:     r[8] || '',
   }));
 }
 
 async function loadCorsi() {
   const rows = await apiGet(SHEET_CORSI);
-  // Header: Nome corso, Prova, x1, x5, x10  (colonne 0-4)
   corsiData = rows.slice(1).map((r, i) => ({
-    _idx:  i + 2,
+    _idx: i + 2,
     nome:  r[0] || '',
     prova: parseNum(r[1]),
     x1:    parseNum(r[2]),
@@ -228,7 +218,6 @@ async function loadTabelle() {
 
 async function loadPresenze() {
   const rows = await apiGet(SHEET_PRESENZE);
-  // Struttura: Giorno, Corso, Allievi presenti (separati da virgola)
   presenzeData = rows.slice(1).map((r, i) => ({
     _idx:    i + 2,
     giorno:  r[0] || '',
@@ -239,7 +228,7 @@ async function loadPresenze() {
 }
 
 // ── NAVIGAZIONE ──────────────────────────────────────────
-const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','iscrizioni','presenze'];
+const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','iscrizioni','presenze','riepilogo-allievo'];
 
 function showSection(name) {
   sections.forEach(s => {
@@ -249,7 +238,6 @@ function showSection(name) {
   $('sec-'+name)?.classList.add('active');
   document.querySelector(`[data-section="${name}"]`)?.classList.add('active');
 
-  // Carica dati on-demand
   if (name === 'dashboard')   renderDashboard();
   if (name === 'elenco')      renderElenco();
   if (name === 'annuale')     renderAnnuale();
@@ -257,9 +245,8 @@ function showSection(name) {
   if (name === 'tabelle')     renderTabelle();
   if (name === 'allievi')     renderAllievi();
   if (name === 'iscrizioni')  renderIscrizioni();
-  if (name === 'presenze')     renderPresenze();
+  if (name === 'presenze')    renderPresenze();
 
-  // Mobile: chiudi sidebar
   if (window.innerWidth <= 768) {
     $('sidebar').classList.remove('open');
   }
@@ -429,12 +416,10 @@ let sortCol = 0, sortAsc = false;
 function renderElenco() {
   const loading = $('tableLoading');
   const table   = $('speseTable');
-  const empty   = $('tableEmpty');
 
   loading.style.display = 'none';
   table.style.display   = '';
 
-  // Popola filtri anno/categoria
   const anni = [...new Set(speseData.map(r => r.data?.getFullYear()).filter(Boolean))].sort((a,b)=>b-a);
   const annoSel = $('fAnno');
   const curAnno = annoSel.value;
@@ -464,7 +449,6 @@ function applyFilters() {
     return true;
   });
 
-  // Sort
   filtered = filtered.sort((a,b) => {
     let va = a.data, vb = b.data;
     if (!va) return 1; if (!vb) return -1;
@@ -627,10 +611,8 @@ function updateAnnuale(anno, mese) {
   $('rSaldo').className     = 'kpi-value ' + (entrate-uscite>=0?'kpi-green':'kpi-red');
   $('rCount').textContent   = rows.length;
 
-  // Grafico: se mese selezionato → settimanale, altrimenti mensile
   let labels, ent, usc;
   if (mese) {
-    // Raggruppa per giorno del mese
     const daysInMonth = new Date(anno, mese, 0).getDate();
     labels = Array.from({length: daysInMonth}, (_,i) => String(i+1));
     ent = labels.map((_,i) => rows.filter(r=>r.tipo==='Entrate'&&r.data?.getDate()===i+1).reduce((s,r)=>s+r.costo,0));
@@ -654,7 +636,6 @@ function updateAnnuale(anno, mese) {
     options: chartOpts()
   });
 
-  // Donut categorie uscite
   const catsUsc = {};
   rows.filter(r=>r.tipo==='Uscite').forEach(r=>{ catsUsc[r.categoria]=(catsUsc[r.categoria]||0)+r.costo; });
   const sortedUsc = Object.entries(catsUsc).sort((a,b)=>b[1]-a[1]);
@@ -669,7 +650,6 @@ function updateAnnuale(anno, mese) {
     options: donutOpts()
   });
 
-  // Breakdown uscite
   const totalUsc = sortedUsc.reduce((s,e)=>s+e[1],0);
   $('catBreakdown').innerHTML = sortedUsc.length ? sortedUsc.map(([cat,val]) => `
     <div class="cat-breakdown-row">
@@ -679,7 +659,6 @@ function updateAnnuale(anno, mese) {
     </div>
   `).join('') : '<p style="color:var(--text-dim);padding:12px 0;font-size:13px;">Nessuna uscita nel periodo.</p>';
 
-  // Breakdown entrate
   const catsEnt = {};
   rows.filter(r=>r.tipo==='Entrate').forEach(r=>{ catsEnt[r.categoria]=(catsEnt[r.categoria]||0)+r.costo; });
   const sortedEnt = Object.entries(catsEnt).sort((a,b)=>b[1]-a[1]);
@@ -700,106 +679,44 @@ function renderGenerale() {
   const usc  = anni.map(a=>speseData.filter(r=>r.tipo==='Uscite' &&r.data?.getFullYear()===a).reduce((s,r)=>s+r.costo,0));
   const saldo= ent.map((e,i)=>e-usc[i]);
 
-  // ── Grafico area/linea ──
   if (chartGeneraleArea) chartGeneraleArea.destroy();
   chartGeneraleArea = new Chart($('chartGeneraleArea'), {
     type: 'line',
     data: {
       labels: anni,
       datasets: [
-        {
-          label: 'Entrate',
-          data: ent,
-          borderColor: '#5cb85c',
-          backgroundColor: 'rgba(92,184,92,0.10)',
-          fill: true,
-          tension: 0.35,
-          pointRadius: 5,
-          pointBackgroundColor: '#5cb85c',
-          pointBorderColor: '#0d0d0f',
-          pointBorderWidth: 2,
-          borderWidth: 2,
-        },
-        {
-          label: 'Uscite',
-          data: usc,
-          borderColor: '#e05555',
-          backgroundColor: 'rgba(224,85,85,0.10)',
-          fill: true,
-          tension: 0.35,
-          pointRadius: 5,
-          pointBackgroundColor: '#e05555',
-          pointBorderColor: '#0d0d0f',
-          pointBorderWidth: 2,
-          borderWidth: 2,
-        },
-        {
-          label: 'Saldo',
-          data: saldo,
-          borderColor: '#c9a96e',
-          backgroundColor: 'rgba(201,169,110,0.08)',
-          fill: true,
-          tension: 0.35,
-          pointRadius: 5,
-          pointBackgroundColor: '#c9a96e',
-          pointBorderColor: '#0d0d0f',
-          pointBorderWidth: 2,
-          borderWidth: 2,
-          borderDash: [5,3],
-        },
+        { label:'Entrate', data:ent, borderColor:'#5cb85c', backgroundColor:'rgba(92,184,92,0.10)', fill:true, tension:0.35, pointRadius:5, pointBackgroundColor:'#5cb85c', pointBorderColor:'#0d0d0f', pointBorderWidth:2, borderWidth:2 },
+        { label:'Uscite',  data:usc, borderColor:'#e05555', backgroundColor:'rgba(224,85,85,0.10)',  fill:true, tension:0.35, pointRadius:5, pointBackgroundColor:'#e05555', pointBorderColor:'#0d0d0f', pointBorderWidth:2, borderWidth:2 },
+        { label:'Saldo',   data:saldo, borderColor:'#c9a96e', backgroundColor:'rgba(201,169,110,0.08)', fill:true, tension:0.35, pointRadius:5, pointBackgroundColor:'#c9a96e', pointBorderColor:'#0d0d0f', pointBorderWidth:2, borderWidth:2, borderDash:[5,3] },
       ]
     },
-    options: {
-      ...chartOpts(),
-      plugins: {
-        ...chartOpts().plugins,
-        legend: { labels: { color: '#888', font: { size: 11 }, boxWidth: 10, padding: 14 } },
-        tooltip: {
-          backgroundColor: '#18181b',
-          borderColor: 'rgba(255,255,255,0.1)',
-          borderWidth: 1,
-          titleColor: '#f0ede8',
-          bodyColor: '#888',
-          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.raw)}` }
-        }
-      }
-    }
+    options: { ...chartOpts(), plugins: { ...chartOpts().plugins, legend: { labels: { color:'#888', font:{size:11}, boxWidth:10, padding:14 } } } }
   });
 
-  // ── Waterfall saldo trimestrale ──
-  const trimSet = new Set();
-  speseData.forEach(r => {
-    if (!r.data) return;
-    const y = r.data.getFullYear();
-    const q = Math.floor(r.data.getMonth()/3)+1;
-    trimSet.add(`${y}-Q${q}`);
-  });
-  const trimLabels = [...trimSet].sort();
-
-  const trimSaldi = trimLabels.map(label => {
-    const [y, q] = label.split('-Q');
-    const year = parseInt(y), quarter = parseInt(q);
-    const months = [0,1,2].map(i => (quarter-1)*3+i);
-    const e = speseData.filter(r=>r.tipo==='Entrate'&&r.data?.getFullYear()===year&&months.includes(r.data.getMonth())).reduce((s,r)=>s+r.costo,0);
-    const u = speseData.filter(r=>r.tipo==='Uscite' &&r.data?.getFullYear()===year&&months.includes(r.data.getMonth())).reduce((s,r)=>s+r.costo,0);
-    return e - u;
+  // Waterfall trimestrale
+  const trimestri = [];
+  anni.forEach(a => {
+    [0,1,2,3].forEach(q => {
+      const label = `${a} Q${q+1}`;
+      const mesi = [q*3, q*3+1, q*3+2];
+      const e = speseData.filter(r=>r.tipo==='Entrate'&&r.data?.getFullYear()===a&&mesi.includes(r.data?.getMonth())).reduce((s,r)=>s+r.costo,0);
+      const u = speseData.filter(r=>r.tipo==='Uscite' &&r.data?.getFullYear()===a&&mesi.includes(r.data?.getMonth())).reduce((s,r)=>s+r.costo,0);
+      trimestri.push({ label, saldo: e-u });
+    });
   });
 
-  // Floating bar: ogni barra = [min(start,end), max(start,end)]
-  // Chart.js floating bar accetta data: [[y0, y1]]
-  let running = 0;
+  const wfLabels = ['Inizio', ...trimestri.map(t=>t.label)];
   const wfData   = [];
   const wfColors = [];
-  const wfLabels = [...trimLabels, 'TOTALE'];
-
-  trimSaldi.forEach(v => {
+  let running = 0;
+  wfData.push([0,0]); wfColors.push('rgba(201,169,110,0.4)');
+  trimestri.forEach(t => {
     const start = running;
-    const end   = running + v;
-    wfData.push([start, end]);
-    wfColors.push(v >= 0 ? 'rgba(92,184,92,0.75)' : 'rgba(224,85,85,0.75)');
+    const end   = running + t.saldo;
+    wfData.push([Math.min(start,end), Math.max(start,end)]);
+    wfColors.push(t.saldo >= 0 ? 'rgba(92,184,92,0.75)' : 'rgba(224,85,85,0.75)');
     running = end;
   });
-  // Barra totale: da 0 al valore finale
   const totFinale = running;
   wfData.push([0, totFinale]);
   wfColors.push(totFinale >= 0 ? 'rgba(201,169,110,0.85)' : 'rgba(224,85,85,0.85)');
@@ -809,43 +726,15 @@ function renderGenerale() {
     type: 'bar',
     data: {
       labels: wfLabels,
-      datasets: [{
-        label: 'Saldo',
-        data: wfData,
-        backgroundColor: wfColors,
-        borderColor: wfColors.map(c => c.replace(/[\d.]+\)$/, '1)')),
-        borderWidth: 1,
-        borderRadius: 4,
-      }]
+      datasets: [{ label:'Saldo', data:wfData, backgroundColor:wfColors, borderColor:wfColors.map(c=>c.replace(/[\d.]+\)$/,'1)')), borderWidth:1, borderRadius:4 }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#18181b',
-          borderColor: 'rgba(255,255,255,0.1)',
-          borderWidth: 1,
-          titleColor: '#f0ede8',
-          bodyColor: '#888',
-          callbacks: {
-            label: ctx => {
-              const [lo, hi] = ctx.raw;
-              const val = hi - lo;
-              return ` ${fmt(val)}  (cumulato: ${fmt(hi)})`;
-            }
-          }
-        }
-      },
-      scales: {
-        x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#666', font: { size: 11 }, callback: v => '€'+v.toLocaleString('it-IT') }, grid: { color: 'rgba(255,255,255,0.04)' } }
-      }
+      responsive:true, maintainAspectRatio:false,
+      plugins: { legend:{display:false}, tooltip:{backgroundColor:'#18181b',borderColor:'rgba(255,255,255,0.1)',borderWidth:1,titleColor:'#f0ede8',bodyColor:'#888',callbacks:{label:ctx=>{const[lo,hi]=ctx.raw;const val=hi-lo;return ` ${fmt(val)}  (cumulato: ${fmt(hi)})`;}}}},
+      scales: { x:{ticks:{color:'#666',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}}, y:{ticks:{color:'#666',font:{size:11},callback:v=>'€'+v.toLocaleString('it-IT')},grid:{color:'rgba(255,255,255,0.04)'}} }
     }
   });
 
-  // Tabella
   $('generaleBody').innerHTML = anni.map((a,i) => {
     const s = ent[i]-usc[i];
     return `<tr>
@@ -862,7 +751,6 @@ function renderGenerale() {
 const MESI_NOMI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
 function renderTabelle() {
-  // Popola anni
   const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort((a,b)=>b-a);
   const annoSel = $('tabelleAnno');
   const curAnno = annoSel.value || String(anni[0] || new Date().getFullYear());
@@ -871,23 +759,17 @@ function renderTabelle() {
 
   const modalita = $('tabelleModalita').value;
   $('tabelleAnnoGroup').style.display = modalita === 'anno' ? '' : 'none';
-
   updateTabelle();
 }
 
 function updateTabelle() {
   const modalita = $('tabelleModalita').value;
   const annoSel  = parseInt($('tabelleAnno').value);
-
-  if (modalita === 'anno') {
-    renderTabellaSingoloAnno(annoSel);
-  } else {
-    renderTabellaMultiAnno();
-  }
+  if (modalita === 'anno') renderTabellaSingoloAnno(annoSel);
+  else renderTabellaMultiAnno();
 }
 
 function buildPivotAnno(anno) {
-  // Restituisce 12 righe: {mese, label, uscite, entrate, guadagno}
   return MESI_NOMI.map((label, m) => {
     const righe = speseData.filter(r => r.data?.getFullYear()===anno && r.data?.getMonth()===m);
     const uscite  = righe.filter(r=>r.tipo==='Uscite').reduce((s,r)=>s+r.costo,0);
@@ -943,24 +825,14 @@ function renderTabellaMultiAnno() {
   const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort();
   if (!anni.length) { $('tabelleContent').innerHTML = '<p style="color:var(--text-muted);padding:20px;">Nessun dato disponibile.</p>'; return; }
 
-  // Tabella: righe = mesi, colonne = anni × (Ent, Usc, Gua)
   const pivots = anni.map(a => ({ anno: a, rows: buildPivotAnno(a) }));
-
   const headerAnni = anni.map(a => `<th colspan="3" style="text-align:center;border-bottom:1px solid var(--border2)">${a}</th>`).join('');
-  const subHeader  = anni.map(() => `
-    <th style="text-align:right;color:var(--green)">Entrate</th>
-    <th style="text-align:right;color:var(--red)">Uscite</th>
-    <th style="text-align:right;color:var(--accent)">Guadagno</th>
-  `).join('');
+  const subHeader  = anni.map(() => `<th style="text-align:right;color:var(--green)">Entrate</th><th style="text-align:right;color:var(--red)">Uscite</th><th style="text-align:right;color:var(--accent)">Guadagno</th>`).join('');
 
   const bodyRows = MESI_NOMI.map((label, m) => {
     const cols = pivots.map(p => {
       const r = p.rows[m];
-      return `
-        <td style="text-align:right;color:var(--green);font-variant-numeric:tabular-nums">${r.entrate ? fmt(r.entrate) : '<span style="color:var(--text-dim)">—</span>'}</td>
-        <td style="text-align:right;color:var(--red);font-variant-numeric:tabular-nums">${r.uscite ? fmt(r.uscite) : '<span style="color:var(--text-dim)">—</span>'}</td>
-        <td style="text-align:right;font-variant-numeric:tabular-nums;color:${r.guadagno>=0?'var(--green)':'var(--red)'}">${r.entrate||r.uscite ? fmt(r.guadagno) : '<span style="color:var(--text-dim)">—</span>'}</td>
-      `;
+      return `<td style="text-align:right;color:var(--green)">${r.entrate ? fmt(r.entrate) : '<span style="color:var(--text-dim)">—</span>'}</td><td style="text-align:right;color:var(--red)">${r.uscite ? fmt(r.uscite) : '<span style="color:var(--text-dim)">—</span>'}</td><td style="text-align:right;color:${r.guadagno>=0?'var(--green)':'var(--red)'}">${r.entrate||r.uscite ? fmt(r.guadagno) : '<span style="color:var(--text-dim)">—</span>'}</td>`;
     }).join('');
     return `<tr><td style="font-weight:500;white-space:nowrap">${label}</td>${cols}</tr>`;
   }).join('');
@@ -969,53 +841,39 @@ function renderTabellaMultiAnno() {
     const totEnt = p.rows.reduce((s,r)=>s+r.entrate,0);
     const totUsc = p.rows.reduce((s,r)=>s+r.uscite,0);
     const totGua = totEnt - totUsc;
-    return `
-      <td style="text-align:right;color:var(--green)">${fmt(totEnt)}</td>
-      <td style="text-align:right;color:var(--red)">${fmt(totUsc)}</td>
-      <td style="text-align:right;color:${totGua>=0?'var(--green)':'var(--red)'}">${fmt(totGua)}</td>
-    `;
+    return `<td style="text-align:right;color:var(--green)">${fmt(totEnt)}</td><td style="text-align:right;color:var(--red)">${fmt(totUsc)}</td><td style="text-align:right;color:${totGua>=0?'var(--green)':'var(--red)'}">${fmt(totGua)}</td>`;
   }).join('');
 
   $('tabelleContent').innerHTML = `
     <div class="card">
-      <div class="card-title">Riepilogo mensile — Tutti gli anni</div>
+      <div class="card-title">Riepilogo tutti gli anni</div>
       <div class="table-wrap" style="margin-top:0;overflow-x:auto;">
         <table class="data-table pivot-table">
           <thead>
-            <tr>
-              <th rowspan="2">Mese</th>
-              ${headerAnni}
-            </tr>
-            <tr>${subHeader}</tr>
+            <tr><th></th>${headerAnni}</tr>
+            <tr><th>Mese</th>${subHeader}</tr>
           </thead>
           <tbody>${bodyRows}</tbody>
-          <tfoot>
-            <tr class="pivot-total">
-              <td>Totale</td>
-              ${totalRow}
-            </tr>
-          </tfoot>
+          <tfoot><tr class="pivot-total"><td>Totale</td>${totalRow}</tr></tfoot>
         </table>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
 function exportTabelleCsv() {
   const modalita = $('tabelleModalita').value;
-  const anno     = parseInt($('tabelleAnno').value);
-  let lines = [];
+  const anni = modalita === 'anno'
+    ? [parseInt($('tabelleAnno').value)]
+    : [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort();
 
+  const lines = [];
   if (modalita === 'anno') {
-    const pivot = buildPivotAnno(anno);
     lines.push(['Mese','Entrate','Uscite','Guadagno'].join(','));
-    pivot.forEach(r => lines.push([r.label, r.entrate.toFixed(2), r.uscite.toFixed(2), r.guadagno.toFixed(2)].join(',')));
-    const totEnt = pivot.reduce((s,r)=>s+r.entrate,0);
-    const totUsc = pivot.reduce((s,r)=>s+r.uscite,0);
-    lines.push(['Totale', totEnt.toFixed(2), totUsc.toFixed(2), (totEnt-totUsc).toFixed(2)].join(','));
+    buildPivotAnno(anni[0]).forEach(r => {
+      lines.push([r.label, r.entrate.toFixed(2), r.uscite.toFixed(2), r.guadagno.toFixed(2)].join(','));
+    });
   } else {
-    const anni = [...new Set(speseData.map(r=>r.data?.getFullYear()).filter(Boolean))].sort();
-    const header = ['Mese', ...anni.flatMap(a=>[`Entrate ${a}`,`Uscite ${a}`,`Guadagno ${a}`])];
+    const header = ['Mese', ...anni.flatMap(a => [`Entrate ${a}`, `Uscite ${a}`, `Guadagno ${a}`])];
     lines.push(header.join(','));
     MESI_NOMI.forEach((label, m) => {
       const cols = anni.flatMap(a => {
@@ -1045,7 +903,6 @@ function exportTabelleCsv() {
 }
 
 // ── ALLIEVI ───────────────────────────────────────────────
-// Palette colori per tipologia (ciclica)
 const TIPO_COLORS = [
   { bg: 'rgba(201,169,110,0.15)', border: '#c9a96e', text: '#c9a96e' },
   { bg: 'rgba(92,184,92,0.12)',   border: '#5cb85c', text: '#5cb85c' },
@@ -1067,7 +924,7 @@ function getTipoColor(tipo) {
 
 let allieviSortCol = 'nomeCompleto';
 let allieviSortAsc = true;
-let editAllieviIdx = null; // null = nuovo, number = _idx esistente
+let editAllieviIdx = null;
 
 async function renderAllievi() {
   $('allieviLoading').style.display=''; $('allieviTableWrap').style.display='none'; $('allieviEmpty').style.display='none';
@@ -1077,7 +934,6 @@ async function renderAllievi() {
   const tipi = [...new Set(allieviData.map(r=>r.tipo).filter(Boolean))].sort();
   $('filterTipoAllievo').innerHTML = '<option value="">Tutti i tipi</option>' + tipi.map(t=>`<option value="${t}">${t}</option>`).join('');
 
-  // Sortable headers
   document.querySelectorAll('#allieviTable th.sortable').forEach(th => {
     th.style.cursor = 'pointer';
     th.onclick = () => {
@@ -1102,7 +958,6 @@ function applyAllieviFilters() {
     return true;
   });
 
-  // Sort
   filtered = filtered.sort((a, b) => {
     let va = String(a[allieviSortCol]||'').toLowerCase();
     let vb = String(b[allieviSortCol]||'').toLowerCase();
@@ -1115,8 +970,12 @@ function applyAllieviFilters() {
   $('allieviBody').innerHTML = filtered.map(r => {
     const c = getTipoColor(r.tipo);
     const badgeStyle = `background:${c.bg};border:1px solid ${c.border};color:${c.text};display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:500;`;
+    // nome cliccabile → riepilogo allievo
+    const nomeSafe = escHtml(r.nomeCompleto).replace(/'/g,'&#39;');
     return `<tr>
-      <td style="font-weight:500">${escHtml(r.nomeCompleto)}</td>
+      <td style="font-weight:500;cursor:pointer;" onclick="apriRiepilogoAllievo('${nomeSafe}')" title="Apri riepilogo">
+        <span style="color:var(--accent);text-decoration:underline;text-underline-offset:3px;">${escHtml(r.nomeCompleto)}</span>
+      </td>
       <td><span style="${badgeStyle}">${escHtml(r.tipo)}</span></td>
       <td style="color:var(--text-muted)">${escHtml(String(r.tesseramento))}</td>
       <td style="color:var(--text-muted)">${escHtml(r.cellulare)}</td>
@@ -1186,7 +1045,6 @@ async function saveAllievo() {
   const row = [cognome, nome, nomeCompleto, tipo, tesseramento, cellulare, mail, indirizzo, note];
 
   if (editAllieviIdx === null) {
-    // Nuovo
     const res = await apiPost({ action: 'append', sheet: SHEET_ALLIEVI, row });
     if (res.ok !== false) {
       allieviData.push({ _idx: allieviData.length + 2, cognome, nome, nomeCompleto, tipo, tesseramento, cellulare, mail, indirizzo, note });
@@ -1194,7 +1052,6 @@ async function saveAllievo() {
       applyAllieviFilters();
     }
   } else {
-    // Modifica
     const res = await apiPost({ action: 'update', sheet: SHEET_ALLIEVI, rowIndex: editAllieviIdx, row });
     if (res.ok !== false) {
       const r = allieviData.find(r => r._idx === editAllieviIdx);
@@ -1295,7 +1152,6 @@ function isPagato(v) {
   return s === 'sì' || s === 'si' || s === 'true' || s === '1' || s === 'yes';
 }
 
-// ─ Calcola costo automatico da corso + tipo
 function getCostoCorso(nomeCorso, tipo) {
   const corso = corsiData.find(c => c.nome === nomeCorso);
   if (!corso) return 0;
@@ -1303,11 +1159,9 @@ function getCostoCorso(nomeCorso, tipo) {
   return map[tipo] || 0;
 }
 
-// ─ Modal iscrizione
 function openNuovaIscrizione() {
   editIscrizioniIdx = null;
   $('modalIscTitle').textContent = 'Nuova iscrizione';
-  // reset fields
   $('iAllievo').value = '';
   $('iAS').value = currentAnnoScolastico();
   $('iData').valueAsDate = new Date();
@@ -1365,15 +1219,13 @@ function autoAggiornaCosto() {
 function populateAllieviDatalist() {
   const dl = $('allieviList');
   if (!dl) return;
-  dl.innerHTML = allieviData
-    .map(a => `<option value="${escHtml(a.nomeCompleto)}">`)
-    .join('');
+  dl.innerHTML = allieviData.map(a => `<option value="${escHtml(a.nomeCompleto)}">`).join('');
 }
 
 function currentAnnoScolastico() {
   const now = new Date();
   const y = now.getFullYear();
-  const m = now.getMonth(); // 0-based
+  const m = now.getMonth();
   return m >= 8 ? `${y}/${y+1}` : `${y-1}/${y}`;
 }
 
@@ -1417,8 +1269,7 @@ async function saveIscrizione() {
 async function deleteIscrizione(idx) {
   const r = iscrizioniData.find(r => r._idx === idx);
   if (!r) return;
-  if (!confirm(`Eliminare l'iscrizione di "${r.allievo}" — ${r.corso} (${r.tipo})?
-L'operazione non può essere annullata.`)) return;
+  if (!confirm(`Eliminare l'iscrizione di "${r.allievo}" — ${r.corso} (${r.tipo})?\nL'operazione non può essere annullata.`)) return;
   const res = await apiPost({ action: 'delete', sheet: SHEET_ISCRIZIONI, rowIndex: idx });
   if (res.ok !== false) {
     iscrizioniData = iscrizioniData.filter(r => r._idx !== idx);
@@ -1426,27 +1277,24 @@ L'operazione non può essere annullata.`)) return;
   }
 }
 
-
 // ── PRESENZE ─────────────────────────────────────────────
 let presView        = 'calendario';
 let presCalYear     = new Date().getFullYear();
-let presCalMonth    = new Date().getMonth(); // 0-based
+let presCalMonth    = new Date().getMonth();
 let editPresIdx     = null;
-let presExtraAllievi= []; // allievi aggiunti extra nella modal
+let presExtraAllievi= [];
 
 async function renderPresenze() {
   if (!presenzeData.length) await loadPresenze();
   if (!corsiData.length)    await loadCorsi();
   if (!allieviData.length)  await loadAllievi();
 
-  // Popola filtro corso
   const corsi = [...new Set(presenzeData.map(r=>r.corso).filter(Boolean))].sort();
   const fCorso = document.getElementById('presFiltroCorso');
   const prevCorso = fCorso.value;
   fCorso.innerHTML = '<option value="">Tutti i corsi</option>' +
     corsi.map(c=>`<option value="${escHtml(c)}"${c===prevCorso?' selected':''}>${escHtml(c)}</option>`).join('');
 
-  // Default filtro mese = mese corrente
   const fMese = document.getElementById('presFiltroMese');
   if (!fMese.value) {
     const now = new Date();
@@ -1491,13 +1339,12 @@ function renderPresCalendario(el) {
     presCalYear = y; presCalMonth = m;
   }
 
-  const firstDay = new Date(y, m, 1).getDay(); // 0=dom
+  const firstDay = new Date(y, m, 1).getDay();
   const daysInMonth = new Date(y, m+1, 0).getDate();
-  const startOffset = (firstDay + 6) % 7; // lun=0
+  const startOffset = (firstDay + 6) % 7;
   const monthLabel = new Date(y, m, 1).toLocaleDateString('it-IT', {month:'long', year:'numeric'});
   const today = new Date(); today.setHours(0,0,0,0);
 
-  // Mappa giorno → presenze
   const byDay = {};
   filteredPresenze().forEach(r => {
     const d = new Date(r.giorno);
@@ -1623,7 +1470,6 @@ function renderPresAllievo(el) {
   const data = filteredPresenze();
   if (!data.length) { el.innerHTML = '<div class="table-empty">Nessuna presenza nel periodo.</div>'; return; }
 
-  // Conta presenze per allievo
   const allieviMap = {};
   data.forEach(r => r.allievi.forEach(a => {
     if (!allieviMap[a]) allieviMap[a] = { count: 0, corsi: {} };
@@ -1632,7 +1478,6 @@ function renderPresAllievo(el) {
   }));
   const sorted = Object.entries(allieviMap).sort((a,b)=>b[1].count-a[1].count);
   const maxCount = sorted[0]?.[1]?.count || 1;
-  const totLezioni = data.length;
 
   el.innerHTML = `
     <div class="card">
@@ -1689,19 +1534,35 @@ function openEditPresenza(idx) {
 
 function populatePCorso(selected) {
   const sel = document.getElementById('pCorso');
-  sel.innerHTML = '<option value="">\u2014 seleziona \u2014</option>' +
+  sel.innerHTML = '<option value="">— seleziona —</option>' +
     corsiData.map(c=>`<option value="${escHtml(c.nome)}"${c.nome===selected?' selected':''}>${escHtml(c.nome)}</option>`).join('');
-  // When editing, pre-load the allievi of this record; when new, empty
   const getChecked = () => editPresIdx ? ((presenzeData.find(r=>r._idx===editPresIdx)||{}).allievi||[]) : [];
   if (selected) renderPresChecklist(getChecked());
-  sel.onchange = () => renderPresChecklist([]); // on manual corso change, reset checks
+  sel.onchange = () => renderPresChecklist([]);
 }
 
 function getAllieviForCorso(nomeCorso) {
-  // Solo gli allievi iscritti a quel corso, ordinati alfabeticamente
   const iscr = [...new Set(iscrizioniData.filter(r => r.corso === nomeCorso).map(r => r.allievo))]
     .sort((a,b)=>a.localeCompare(b,'it'));
   return iscr;
+}
+
+// Helper: lezioni totali da tipo iscrizione
+function lezioniDaTipo(tipo) {
+  if (tipo === 'x1')    return 1;
+  if (tipo === 'x5')    return 5;
+  if (tipo === 'x10')   return 10;
+  if (tipo === 'Prova') return 1;
+  return 0;
+}
+
+// Helper: lezioni rimanenti per allievo in un corso
+function lezioniRimanentePerAllievo(nomeAllievo, nomeCorso) {
+  const iscrizioni = iscrizioniData.filter(r => r.allievo === nomeAllievo && r.corso === nomeCorso);
+  const totLezioni = iscrizioni.reduce((s, r) => s + lezioniDaTipo(r.tipo), 0);
+  if (totLezioni === 0) return null;
+  const presTot = presenzeData.filter(p => p.corso === nomeCorso && p.allievi.includes(nomeAllievo)).length;
+  return { totLezioni, presTot, rimanenti: Math.max(0, totLezioni - presTot) };
 }
 
 function renderPresChecklist(checked) {
@@ -1713,7 +1574,7 @@ function renderPresChecklist(checked) {
     return;
   }
 
-  const iscritti  = getAllieviForCorso(nomeCorso); // solo iscritti, già ordinati
+  const iscritti  = getAllieviForCorso(nomeCorso);
   const checkedSet= new Set(checked);
 
   if (!iscritti.length) {
@@ -1722,7 +1583,6 @@ function renderPresChecklist(checked) {
     return;
   }
 
-  // Header: "Seleziona tutti" checkbox
   const allChecked = iscritti.every(n => checkedSet.has(n));
   list.innerHTML = `
     <label class="pres-check-item" id="presCheckAll" data-nome="__all__"
@@ -1734,9 +1594,20 @@ function renderPresChecklist(checked) {
     </label>
     ${iscritti.map(nome => {
       const isCk = checkedSet.has(nome);
+      const rimInfo = lezioniRimanentePerAllievo(nome, nomeCorso);
+      let alertBadge = '';
+      if (rimInfo) {
+        if (rimInfo.rimanenti === 0)
+          alertBadge = '<span style="font-size:10px;padding:1px 6px;border-radius:99px;background:rgba(224,85,85,0.15);color:#e05555;margin-left:auto;flex-shrink:0;">ESAURITO</span>';
+        else if (rimInfo.rimanenti === 1)
+          alertBadge = '<span style="font-size:10px;padding:1px 6px;border-radius:99px;background:rgba(255,165,0,0.15);color:orange;margin-left:auto;flex-shrink:0;">ultima lezione</span>';
+        else
+          alertBadge = `<span style="font-size:10px;color:var(--text-dim);margin-left:auto;flex-shrink:0;">${rimInfo.rimanenti} rim.</span>`;
+      }
       return `<label class="pres-check-item${isCk?' checked':''}" data-nome="${escHtml(nome)}">
         <input type="checkbox" ${isCk?'checked':''} onchange="onPresCheck(this)">
         <span class="pres-check-name">${escHtml(nome)}</span>
+        ${alertBadge}
       </label>`;
     }).join('')}`;
 
@@ -1744,34 +1615,32 @@ function renderPresChecklist(checked) {
 }
 
 function toggleSelectAll(cb) {
-  const items = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll)')];
-  items.forEach(item => {
-    const box = item.querySelector('input[type=checkbox]');
-    if (box) { box.checked = cb.checked; item.classList.toggle('checked', cb.checked); }
+  document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll) input[type=checkbox]').forEach(c => {
+    c.checked = cb.checked;
+    c.closest('.pres-check-item').classList.toggle('checked', cb.checked);
   });
   updatePresConteggio();
 }
 
 function onPresCheck(cb) {
   const item = cb.closest('.pres-check-item');
-  item.classList.toggle('checked', cb.checked);
-  // Aggiorna stato "seleziona tutti"
-  const allBoxes  = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll) input[type=checkbox]')];
-  const cbAll     = document.getElementById('cbSelectAll');
-  if (cbAll) cbAll.checked = allBoxes.length > 0 && allBoxes.every(b => b.checked);
+  if (item) item.classList.toggle('checked', cb.checked);
+  const all = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll) input[type=checkbox]')];
+  const cbAll = document.getElementById('cbSelectAll');
+  if (cbAll) cbAll.checked = all.every(c=>c.checked);
   updatePresConteggio();
 }
 
 function updatePresConteggio() {
-  const count = document.querySelectorAll('#presAllieviList input[type=checkbox]:checked').length
-              + presExtraAllievi.length;
-  document.getElementById('presConteggioLabel').textContent = count ? `(${count} presenti)` : '';
+  const fromList = document.querySelectorAll('#presAllieviList input[type=checkbox]:checked').length;
+  const count = fromList + presExtraAllievi.length;
+  const label = document.getElementById('presConteggioLabel');
+  if (label) label.textContent = count > 0 ? `(${count} presenti)` : '';
 }
 
 function addPresExtra() {
   const val = document.getElementById('pExtraAllievo').value.trim();
   if (!val) return;
-  // Se è già tra gli iscritti in checklist, spunta il checkbox invece di aggiungerlo extra
   const inList = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll)')]
     .find(el => el.dataset.nome === val);
   if (inList) {
@@ -1780,7 +1649,6 @@ function addPresExtra() {
     document.getElementById('pExtraAllievo').value = '';
     return;
   }
-  // Altrimenti aggiungi come extra (non iscritto)
   if (presExtraAllievi.includes(val)) { document.getElementById('pExtraAllievo').value=''; return; }
   presExtraAllievi.push(val);
   renderExtraChips();
@@ -1797,7 +1665,7 @@ function removePresExtra(nome) {
 function renderExtraChips() {
   document.getElementById('presExtraList').innerHTML = presExtraAllievi.map(nome =>
     `<span class="pres-extra-chip">${escHtml(nome)}
-      <button onclick="removePresExtra('${escHtml(nome)}')">\u00d7</button>
+      <button onclick="removePresExtra('${escHtml(nome)}')">&times;</button>
     </span>`
   ).join('');
 }
@@ -1815,7 +1683,8 @@ async function savePresenza() {
   if (!corso)  return alert('Seleziona un corso.');
 
   const fromList = [...document.querySelectorAll('#presAllieviList input[type=checkbox]:checked')]
-    .map(cb => cb.closest('.pres-check-item').dataset.nome);
+    .map(cb => cb.closest('.pres-check-item').dataset.nome)
+    .filter(n => n && n !== '__all__');
   const allPresenti = [...new Set([...fromList, ...presExtraAllievi])].sort((a,b)=>a.localeCompare(b,'it'));
   const allieviStr  = allPresenti.join(',');
 
@@ -1850,6 +1719,121 @@ async function deletePresenza(idx) {
   }
 }
 
+// ══════════════════════════════════════════════════════════
+//  RIEPILOGO ALLIEVO
+// ══════════════════════════════════════════════════════════
+
+async function apriRiepilogoAllievo(nomeCompleto) {
+  if (!iscrizioniData.length) await loadIscrizioni();
+  if (!presenzeData.length)   await loadPresenze();
+  if (!corsiData.length)       await loadCorsi();
+
+  document.getElementById('riepilogoAllievoTitolo').textContent = nomeCompleto;
+  document.getElementById('riepilogoAllievoSub').textContent    = 'Storico iscrizioni, pagamenti e presenze.';
+
+  const navEl = document.getElementById('navRiepilogoAllievo');
+  if (navEl) navEl.style.display = '';
+
+  showSection('riepilogo-allievo');
+  renderRiepilogoAllievo(nomeCompleto);
+}
+
+function renderRiepilogoAllievo(nomeCompleto) {
+  const el = document.getElementById('riepilogoAllievoContent');
+  if (!el) return;
+
+  const iscrizioni = iscrizioniData.filter(r => r.allievo === nomeCompleto);
+  const presenze   = presenzeData.filter(r => r.allievi.includes(nomeCompleto));
+
+  const riepilogo = iscrizioni.map(isc => {
+    const lezioniTotali   = lezioniDaTipo(isc.tipo);
+    const presenzeAlCorso = presenze.filter(p => p.corso === isc.corso).length;
+    const consumate       = Math.min(lezioniTotali, presenzeAlCorso);
+    const rimanenti       = Math.max(0, lezioniTotali - presenzeAlCorso);
+    return { ...isc, lezioniTotali, consumate, rimanenti };
+  });
+
+  const totPagato   = iscrizioni.filter(r => isPagato(r.pagato)).length;
+  const totDaPagare = iscrizioni.length - totPagato;
+  const importoTot  = iscrizioni.reduce((s, r) => s + (r.costo || 0), 0);
+  const importoPag  = iscrizioni.filter(r => isPagato(r.pagato)).reduce((s, r) => s + (r.costo || 0), 0);
+
+  el.innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:24px;">
+      <div class="kpi-card"><div class="kpi-label">Iscrizioni</div><div class="kpi-value">${iscrizioni.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Pagamenti OK</div><div class="kpi-value kpi-green">${totPagato}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Da pagare</div><div class="kpi-value${totDaPagare > 0 ? ' kpi-red' : ''}">${totDaPagare}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Totale</div><div class="kpi-value">${fmt(importoTot)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Incassato</div><div class="kpi-value kpi-green">${fmt(importoPag)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Presenze</div><div class="kpi-value">${presenze.length}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-title">Iscrizioni e lezioni rimanenti</div>
+      ${!riepilogo.length ? '<div class="table-empty" style="margin-top:12px;">Nessuna iscrizione.</div>' : `
+      <div class="table-wrap" style="margin-top:12px;">
+        <table class="data-table">
+          <thead><tr>
+            <th>A.S.</th><th>Data</th><th>Corso</th><th>Tipo</th>
+            <th>Pagato</th><th style="text-align:right">Costo</th>
+            <th style="text-align:center">Tot.</th>
+            <th>Progresso</th>
+            <th style="text-align:center">Rimaste</th>
+          </tr></thead>
+          <tbody>
+            ${riepilogo.map(r => {
+              const pct = r.lezioniTotali > 0 ? Math.round(r.consumate / r.lezioniTotali * 100) : 0;
+              const rimColor = r.rimanenti === 0 ? 'color:var(--text-dim)' : r.rimanenti <= 2 ? 'color:orange' : 'color:var(--text)';
+              const pagatoOk = isPagato(r.pagato);
+              return `<tr>
+                <td style="color:var(--text-muted)">${escHtml(r.as)}</td>
+                <td style="color:var(--text-muted)">${escHtml(String(r.data))}</td>
+                <td style="font-weight:500">${escHtml(r.corso)}</td>
+                <td><span style="background:var(--accent-dim);border:1px solid rgba(201,169,110,0.2);color:var(--accent);padding:2px 8px;border-radius:99px;font-size:11px;">${escHtml(r.tipo)}</span></td>
+                <td>${pagatoOk
+                  ? `<span style="color:var(--green);font-size:12px;">✓ Sì</span>${r.dataPag ? `<br><span style="color:var(--text-dim);font-size:10px;">${escHtml(String(r.dataPag))}</span>` : ''}`
+                  : '<span style="color:var(--red);font-size:12px;">✗ No</span>'}</td>
+                <td style="text-align:right;font-weight:500">${fmt(r.costo)}</td>
+                <td style="text-align:center;color:var(--text-muted)">${r.lezioniTotali}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div style="flex:1;height:6px;background:var(--border);border-radius:99px;overflow:hidden;min-width:60px;">
+                      <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:99px;"></div>
+                    </div>
+                    <span style="font-size:11px;color:var(--text-muted)">${r.consumate}/${r.lezioniTotali}</span>
+                  </div>
+                </td>
+                <td style="text-align:center;">
+                  <span style="font-size:14px;font-weight:700;${rimColor}">
+                    ${r.rimanenti}${r.rimanenti <= 2 && r.rimanenti > 0 ? ' ⚠' : r.rimanenti === 0 ? ' ✓' : ''}
+                  </span>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Storico presenze</div>
+      ${!presenze.length ? '<div class="table-empty" style="margin-top:12px;">Nessuna presenza registrata.</div>' : `
+      <div class="table-wrap" style="margin-top:12px;">
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Corso</th><th>Note</th></tr></thead>
+          <tbody>
+            ${[...presenze].sort((a,b)=>b.giorno.localeCompare(a.giorno)).map(p=>`
+            <tr>
+              <td>${escHtml(p.giorno)}</td>
+              <td>${escHtml(p.corso)}</td>
+              <td style="color:var(--text-dim);font-size:12px;">${escHtml(p.note||'—')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+  `;
+}
 
 // ── CHART CONFIG ──────────────────────────────────────────
 function chartOpts() {
@@ -1895,19 +1879,16 @@ function escHtml(s) {
 function applyTheme(theme) {
   document.body.classList.toggle('light', theme === 'light');
   localStorage.setItem('danza_theme', theme);
-  // Icone
   const sun  = $('iconSun');
   const moon = $('iconMoon');
   if (sun && moon) {
     sun.style.display  = theme === 'light' ? '' : 'none';
     moon.style.display = theme === 'light' ? 'none' : '';
   }
-  // Ridisegna i grafici con i colori corretti
   const gridColor = theme === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.04)';
   const tickColor = theme === 'light' ? '#999' : '#666';
   Chart.defaults.color = tickColor;
   Chart.defaults.borderColor = gridColor;
-  // Re-render sezione attiva se ha grafici
   const active = document.querySelector('.section.active');
   if (active) {
     const id = active.id.replace('sec-','');
@@ -1923,7 +1904,6 @@ function applyTheme(theme) {
 
 // ── INIT ──────────────────────────────────────────────────
 async function init() {
-  // Tema chiaro/scuro
   const savedTheme = localStorage.getItem('danza_theme') || 'dark';
   if (savedTheme === 'light') applyTheme('light');
 
@@ -1942,13 +1922,11 @@ async function init() {
     }
   });
 
-  // Logout
   $('btnLogout').addEventListener('click', () => {
     sessionStorage.removeItem('danza_auth');
     window.location.replace('login.html');
   });
 
-  // Nav items
   document.querySelectorAll('.nav-item[data-section]').forEach(item => {
     item.addEventListener('click', () => showSection(item.dataset.section));
   });
@@ -1966,7 +1944,6 @@ async function init() {
   $('modalAllieviSave').addEventListener('click', saveAllievo);
   $('modalAllieviOverlay').addEventListener('click', e => { if (e.target === $('modalAllieviOverlay')) closeAllieviModal(); });
 
-  // Allievo tipo chips
   document.querySelectorAll('#aTipoGrid .cat-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       document.querySelectorAll('#aTipoGrid .cat-chip').forEach(c => c.classList.remove('active'));
@@ -1977,9 +1954,10 @@ async function init() {
 
   // Presenze
   $('btnNuovaPresenza').addEventListener('click', async () => {
-    if (!corsiData.length)  await loadCorsi();
-    if (!allieviData.length) await loadAllievi();
-    if (!iscrizioniData.length) await loadIscrizioni();
+    if (!corsiData.length)       await loadCorsi();
+    if (!allieviData.length)     await loadAllievi();
+    if (!iscrizioniData.length)  await loadIscrizioni();
+    if (!presenzeData.length)    await loadPresenze();
     populateAllieviDatalist();
     openNuovaPresenza();
   });
@@ -1990,7 +1968,6 @@ async function init() {
   $('btnPresAddExtra').addEventListener('click', addPresExtra);
   $('pExtraAllievo').addEventListener('keydown', e => { if (e.key==='Enter') { e.preventDefault(); addPresExtra(); } });
 
-  // Presenze view switcher
   document.querySelectorAll('.pres-view-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.pres-view-btn').forEach(b => b.classList.remove('active'));
@@ -2000,7 +1977,6 @@ async function init() {
     });
   });
 
-  // Presenze filtri
   $('presFiltroCorso').addEventListener('change', renderPresView);
   $('presFiltroMese').addEventListener('change', () => {
     const [y,m] = ($('presFiltroMese').value||'').split('-');
@@ -2043,7 +2019,6 @@ async function init() {
   $('modalIscSave').addEventListener('click', saveIscrizione);
   $('modalIscOverlay').addEventListener('click', e => { if (e.target === $('modalIscOverlay')) closeIscModal(); });
 
-  // Tipo iscrizione chips
   document.querySelectorAll('#iTipoGrid .cat-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       document.querySelectorAll('#iTipoGrid .cat-chip').forEach(c => c.classList.remove('active'));
@@ -2053,20 +2028,15 @@ async function init() {
     });
   });
 
-  // Auto-aggiorna costo quando cambia corso
   $('iCorso').addEventListener('change', autoAggiornaCosto);
 
-  // Init elenco filtri
   initElencoFilters();
-  // Init form inserimento
   initInserimento();
 
-  // Carica dati principali
   await loadSpese();
   await loadAllievi();
   await loadCorsi();
 
-  // Mostra dashboard
   showSection('dashboard');
 }
 
