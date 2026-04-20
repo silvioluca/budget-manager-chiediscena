@@ -39,8 +39,13 @@ let chartWaterfall = null;
 const fmt = (n) => new Intl.NumberFormat('it-IT', {style:'currency', currency:'EUR'}).format(n);
 const fmtDate = (d) => {
   if (!d) return '';
+  // Handle ISO string directly to avoid timezone shifts
+  if (typeof d === 'string') {
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  }
   const dt = new Date(d);
-  if (isNaN(dt)) return d;
+  if (isNaN(dt)) return String(d);
   return dt.toLocaleDateString('it-IT');
 };
 const parseDate = (v) => {
@@ -246,6 +251,7 @@ function showSection(name) {
   if (name === 'allievi')     renderAllievi();
   if (name === 'iscrizioni')  renderIscrizioni();
   if (name === 'presenze')    renderPresenze();
+  if (name === 'riepilogo-allievo') renderRiepilogoSection();
 
   if (window.innerWidth <= 768) {
     $('sidebar').classList.remove('open');
@@ -1121,7 +1127,9 @@ function applyIscrizioniFilters() {
     const tc   = TIPO_ISC_COLORS[r.tipo] || { bg:'rgba(255,255,255,0.05)', border:'#555', text:'#888' };
     const tStyle = `background:${tc.bg};border:1px solid ${tc.border};color:${tc.text};display:inline-flex;align-items:center;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:500;`;
     return `<tr>
-      <td style="font-weight:500">${escHtml(r.allievo)}</td>
+      <td style="font-weight:500;cursor:pointer;" onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')" title="Apri riepilogo">
+        <span style="color:var(--accent);text-decoration:underline;text-underline-offset:3px;">${escHtml(r.allievo)}</span>
+      </td>
       <td><span class="badge badge-gold">${escHtml(r.as)}</span></td>
       <td>${fmtDate(r.data)}</td>
       <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
@@ -1723,16 +1731,43 @@ async function deletePresenza(idx) {
 //  RIEPILOGO ALLIEVO
 // ══════════════════════════════════════════════════════════
 
-async function apriRiepilogoAllievo(nomeCompleto) {
+function initRiepilogoAllievo() {
+  const input = $('riepilogoSearch');
+  const btn   = $('btnRiepilogoCerca');
+  if (!input || !btn) return;
+
+  const cerca = async () => {
+    const val = input.value.trim();
+    if (!val) return;
+    if (!iscrizioniData.length) await loadIscrizioni();
+    if (!presenzeData.length)   await loadPresenze();
+    if (!corsiData.length)       await loadCorsi();
+    if (!allieviData.length)     await loadAllievi();
+    // Popola datalist
+    const dl = $('riepilogoAllieviList');
+    if (dl) dl.innerHTML = allieviData.map(a=>`<option value="${escHtml(a.nomeCompleto)}">`).join('');
+    document.getElementById('riepilogoAllievoTitolo').textContent = val;
+    document.getElementById('riepilogoAllievoSub').textContent    = 'Storico iscrizioni, pagamenti e presenze.';
+    renderRiepilogoAllievo(val);
+  };
+
+  btn.addEventListener('click', cerca);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') cerca(); });
+}
+
+// Popola datalist riepilogo quando si entra nella sezione
+async function renderRiepilogoSection() {
+  if (!allieviData.length) await loadAllievi();
+  const dl = $('riepilogoAllieviList');
+  if (dl) dl.innerHTML = allieviData.map(a=>`<option value="${escHtml(a.nomeCompleto)}">`).join('');
+}
   if (!iscrizioniData.length) await loadIscrizioni();
   if (!presenzeData.length)   await loadPresenze();
   if (!corsiData.length)       await loadCorsi();
 
   document.getElementById('riepilogoAllievoTitolo').textContent = nomeCompleto;
   document.getElementById('riepilogoAllievoSub').textContent    = 'Storico iscrizioni, pagamenti e presenze.';
-
-  const navEl = document.getElementById('navRiepilogoAllievo');
-  if (navEl) navEl.style.display = '';
+  document.getElementById('riepilogoSearch').value = nomeCompleto;
 
   showSection('riepilogo-allievo');
   renderRiepilogoAllievo(nomeCompleto);
@@ -1758,6 +1793,10 @@ function renderRiepilogoAllievo(nomeCompleto) {
   const importoTot  = iscrizioni.reduce((s, r) => s + (r.costo || 0), 0);
   const importoPag  = iscrizioni.filter(r => isPagato(r.pagato)).reduce((s, r) => s + (r.costo || 0), 0);
 
+  // Anni e corsi per filtri presenze
+  const corsiPresenze = [...new Set(presenze.map(p => p.corso).filter(Boolean))].sort();
+  const anniPresenze  = [...new Set(presenze.map(p => p.giorno?.slice(0,4)).filter(Boolean))].sort().reverse();
+
   el.innerHTML = `
     <div class="kpi-grid" style="margin-bottom:24px;">
       <div class="kpi-card"><div class="kpi-label">Iscrizioni</div><div class="kpi-value">${iscrizioni.length}</div></div>
@@ -1771,15 +1810,17 @@ function renderRiepilogoAllievo(nomeCompleto) {
     <div class="card" style="margin-bottom:20px;">
       <div class="card-title">Iscrizioni e lezioni rimanenti</div>
       ${!riepilogo.length ? '<div class="table-empty" style="margin-top:12px;">Nessuna iscrizione.</div>' : `
-      <div class="table-wrap" style="margin-top:12px;">
+      <div class="table-wrap" style="margin-top:12px;max-height:320px;overflow-y:auto;">
         <table class="data-table">
-          <thead><tr>
-            <th>A.S.</th><th>Data</th><th>Corso</th><th>Tipo</th>
-            <th>Pagato</th><th style="text-align:right">Costo</th>
-            <th style="text-align:center">Tot.</th>
-            <th>Progresso</th>
-            <th style="text-align:center">Rimaste</th>
-          </tr></thead>
+          <thead style="position:sticky;top:0;z-index:2;background:var(--surface);">
+            <tr>
+              <th>A.S.</th><th>Data</th><th>Corso</th><th>Tipo</th>
+              <th>Pagato</th><th style="text-align:right">Costo</th>
+              <th style="text-align:center">Tot.</th>
+              <th>Progresso</th>
+              <th style="text-align:center">Rimaste</th>
+            </tr>
+          </thead>
           <tbody>
             ${riepilogo.map(r => {
               const pct = r.lezioniTotali > 0 ? Math.round(r.consumate / r.lezioniTotali * 100) : 0;
@@ -1787,11 +1828,11 @@ function renderRiepilogoAllievo(nomeCompleto) {
               const pagatoOk = isPagato(r.pagato);
               return `<tr>
                 <td style="color:var(--text-muted)">${escHtml(r.as)}</td>
-                <td style="color:var(--text-muted)">${escHtml(String(r.data))}</td>
+                <td style="color:var(--text-muted)">${fmtDate(r.data)}</td>
                 <td style="font-weight:500">${escHtml(r.corso)}</td>
                 <td><span style="background:var(--accent-dim);border:1px solid rgba(201,169,110,0.2);color:var(--accent);padding:2px 8px;border-radius:99px;font-size:11px;">${escHtml(r.tipo)}</span></td>
                 <td>${pagatoOk
-                  ? `<span style="color:var(--green);font-size:12px;">✓ Sì</span>${r.dataPag ? `<br><span style="color:var(--text-dim);font-size:10px;">${escHtml(String(r.dataPag))}</span>` : ''}`
+                  ? `<span style="color:var(--green);font-size:12px;">✓ Sì</span>${r.dataPag ? `<br><span style="color:var(--text-dim);font-size:10px;">${fmtDate(r.dataPag)}</span>` : ''}`
                   : '<span style="color:var(--red);font-size:12px;">✗ No</span>'}</td>
                 <td style="text-align:right;font-weight:500">${fmt(r.costo)}</td>
                 <td style="text-align:center;color:var(--text-muted)">${r.lezioniTotali}</td>
@@ -1817,22 +1858,57 @@ function renderRiepilogoAllievo(nomeCompleto) {
 
     <div class="card">
       <div class="card-title">Storico presenze</div>
-      ${!presenze.length ? '<div class="table-empty" style="margin-top:12px;">Nessuna presenza registrata.</div>' : `
-      <div class="table-wrap" style="margin-top:12px;">
-        <table class="data-table">
-          <thead><tr><th>Data</th><th>Corso</th><th>Note</th></tr></thead>
-          <tbody>
-            ${[...presenze].sort((a,b)=>b.giorno.localeCompare(a.giorno)).map(p=>`
-            <tr>
-              <td>${escHtml(p.giorno)}</td>
-              <td>${escHtml(p.corso)}</td>
-              <td style="color:var(--text-dim);font-size:12px;">${escHtml(p.note||'—')}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">
+        <select class="filter-select" id="riepilogoPresCorso" style="width:180px;">
+          <option value="">Tutti i corsi</option>
+          ${corsiPresenze.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('')}
+        </select>
+        <select class="filter-select" id="riepilogoPresAnno" style="width:120px;">
+          <option value="">Tutti gli anni</option>
+          ${anniPresenze.map(a=>`<option value="${a}">${a}</option>`).join('')}
+        </select>
+      </div>
+      <div id="riepilogoPresTable">
+        ${buildPresenzeTable(presenze)}
+      </div>
     </div>
   `;
+
+  // Filtri presenze
+  const applyPresFilter = () => {
+    const corso = document.getElementById('riepilogoPresCorso')?.value || '';
+    const anno  = document.getElementById('riepilogoPresAnno')?.value  || '';
+    const filtered = presenze.filter(p => {
+      if (corso && p.corso !== corso) return false;
+      if (anno  && !p.giorno?.startsWith(anno)) return false;
+      return true;
+    });
+    const tEl = document.getElementById('riepilogoPresTable');
+    if (tEl) tEl.innerHTML = buildPresenzeTable(filtered);
+  };
+  document.getElementById('riepilogoPresCorso')?.addEventListener('change', applyPresFilter);
+  document.getElementById('riepilogoPresAnno')?.addEventListener('change', applyPresFilter);
+}
+
+function buildPresenzeTable(presenze) {
+  const sorted = [...presenze].sort((a,b) => b.giorno.localeCompare(a.giorno));
+  if (!sorted.length) return '<div class="table-empty" style="margin-top:0;">Nessuna presenza.</div>';
+  return `
+    <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+      <table class="data-table">
+        <thead style="position:sticky;top:0;z-index:2;background:var(--surface);">
+          <tr><th>Data</th><th>Corso</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+          ${sorted.map(p=>`
+          <tr>
+            <td style="white-space:nowrap">${fmtDate(p.giorno)}</td>
+            <td>${escHtml(p.corso)}</td>
+            <td style="color:var(--text-dim);font-size:12px;">${escHtml(p.note||'—')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 // ── CHART CONFIG ──────────────────────────────────────────
@@ -2032,6 +2108,7 @@ async function init() {
 
   initElencoFilters();
   initInserimento();
+  initRiepilogoAllievo();
 
   await loadSpese();
   await loadAllievi();
