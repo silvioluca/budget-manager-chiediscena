@@ -139,41 +139,83 @@
   </div>
   <div class="login-box">
     <div>
+      <label class="form-label" for="email">Email</label>
+      <input class="form-input" type="email" id="email" placeholder="email@esempio.it" autocomplete="username">
+    </div>
+    <div>
       <label class="form-label" for="pwd">Password</label>
       <input class="form-input" type="password" id="pwd" placeholder="••••••••" autocomplete="current-password">
     </div>
     <div class="divider"></div>
     <button class="btn-login" id="btnLogin">Accedi</button>
-    <div class="login-error" id="errMsg">Password errata. Riprova.</div>
+    <button class="btn-login" id="btnGoogle" style="display:flex;align-items:center;justify-content:center;gap:10px;">
+      <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.1 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C41 35.4 44 30.2 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+      Accedi con Google
+    </button>
+    <div class="login-error" id="errMsg">Credenziali errate. Riprova.</div>
   </div>
 </div>
-<script>
-  // SHA-256 della password esistente (invariata)
-  const PASSWORD_HASH = '8891cf0b687870411e7521293c0d63f0ce43d7ef523b5bd57c02733bc0c7d111';
+<script type="module">
+  import { auth, signInWithEmailAndPassword, signInWithGoogle, signOut, checkAccess } from './db.js';
+  import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 
-  async function sha256(msg) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-  }
+  const showErr = (msg) => {
+    const el = document.getElementById('errMsg');
+    el.textContent = msg;
+    el.classList.add('show');
+  };
 
-  if (sessionStorage.getItem('danza_auth') === '1') window.location.replace('app.html');
-
-  async function tryLogin() {
-    const val = document.getElementById('pwd').value;
-    const hash = await sha256(val);
-    if (hash === PASSWORD_HASH) {
+  // Già loggato → vai all'app
+  const unsub = onAuthStateChanged(auth, user => {
+    unsub();
+    if (user) {
       sessionStorage.setItem('danza_auth', '1');
       window.location.replace('app.html');
-    } else {
-      document.getElementById('errMsg').classList.add('show');
+    }
+  });
+
+  // Dopo il login verifica la whitelist (regole Firestore):
+  // se l'account non è autorizzato, esci subito.
+  async function enterApp() {
+    if (!(await checkAccess())) {
+      await signOut(auth);
+      showErr('Account non autorizzato.');
+      return;
+    }
+    sessionStorage.setItem('danza_auth', '1');
+    window.location.replace('app.html');
+  }
+
+  async function tryLogin() {
+    const email = document.getElementById('email').value.trim();
+    const pwd   = document.getElementById('pwd').value;
+    if (!email || !pwd) return;
+    try {
+      await signInWithEmailAndPassword(auth, email, pwd);
+      await enterApp();
+    } catch (e) {
+      showErr('Credenziali errate. Riprova.');
       document.getElementById('pwd').value = '';
       document.getElementById('pwd').focus();
     }
   }
 
+  async function tryGoogle() {
+    try {
+      await signInWithGoogle();
+      await enterApp();
+    } catch (e) {
+      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+        showErr('Accesso Google non riuscito.');
+      }
+    }
+  }
+
   document.getElementById('btnLogin').addEventListener('click', tryLogin);
+  document.getElementById('btnGoogle').addEventListener('click', tryGoogle);
   document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
   document.getElementById('pwd').addEventListener('input', () => document.getElementById('errMsg').classList.remove('show'));
+  document.getElementById('email').addEventListener('input', () => document.getElementById('errMsg').classList.remove('show'));
 </script>
 </body>
 </html>

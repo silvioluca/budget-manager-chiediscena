@@ -26,6 +26,7 @@
 }
 
 /* ─── LIGHT THEME ────────────────────────────────────── */
+html.light,
 body.light {
   --bg:        #f5f4f0;
   --surface:   #ffffff;
@@ -856,4 +857,46 @@ body.light .pivot-total td {
   height: 100%; border-radius: 99px;
   background: var(--accent);
   transition: width 0.5s ease;
+}
+
+/* ─── PRINT (Nota mensile PDF) ───────────────────────────── */
+@media print {
+  /* colori neutri per la stampa */
+  :root {
+    --bg:        #ffffff;
+    --surface:   #ffffff;
+    --surface2:  #f7f7f7;
+    --border:    rgba(0,0,0,0.15);
+    --border2:   rgba(0,0,0,0.28);
+    --text:      #111111;
+    --text-muted:#555555;
+    --text-dim:  #888888;
+    --accent:    #7a5c1e;
+    --green:     #2e7d32;
+    --red:       #c62828;
+  }
+
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-shadow: none !important; }
+
+  html, body { background: #fff !important; color: #111 !important; margin: 0; }
+
+  /* nascondi tutto tranne la nota mensile */
+  .header, .sidebar, .section-header { display: none !important; }
+  .main { margin: 0 !important; padding: 16px !important; }
+  .section { display: none !important; }
+  #sec-nota-mensile { display: block !important; padding: 0 !important; }
+
+  /* nascondi i pulsanti dentro la card */
+  #notaCopyBtn, #notaCsvBtn, #notaPdfBtn { display: none !important; }
+
+  /* card piatta */
+  .card { border: none !important; padding: 0 !important; }
+
+  /* tabella compatta */
+  .table-wrap { overflow: visible !important; }
+  .data-table { font-size: 11px; }
+  .data-table th, .data-table td { padding: 5px 8px; }
+  .data-table thead th { background: #f0f0f0 !important; color: #111 !important; }
+  .data-table tbody tr:hover { background: transparent !important; }
+  .pivot-total td { background: #f0f0f0 !important; }
 }
