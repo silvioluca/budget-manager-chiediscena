@@ -452,6 +452,8 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .data-table {
   width: 100%;
@@ -599,13 +601,138 @@ html, body {
 .cat-breakdown-bar { height: 100%; background: var(--accent); border-radius: 99px; transition: width 0.6s ease; }
 .cat-breakdown-val { width: 80px; text-align: right; font-size: 13px; color: var(--text); }
 
+/* ─── SIDEBAR OVERLAY (mobile) ───────────────────────── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: var(--header-h) 0 0 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 140;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.sidebar-overlay.show { display: block; opacity: 1; }
+
+/* ─── BOTTOM NAV (mobile) ────────────────────────────── */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: calc(60px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+  z-index: 180;
+}
+.bnav-item {
+  flex: 1;
+  min-width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.bnav-item svg { width: 19px; height: 19px; }
+.bnav-item.active { color: var(--accent); }
+
+/* Display stretti: restano solo le 5 voci principali */
+@media (max-width: 560px) {
+  .bnav-item.bnav-extra { display: none; }
+}
+
 /* ─── RESPONSIVE ─────────────────────────────────────── */
-@media (max-width: 768px) {
-  .sidebar { transform: translateX(calc(-1 * var(--sidebar-w))); }
+@media (max-width: 1024px) {
+  .sidebar { transform: translateX(calc(-1 * var(--sidebar-w))); box-shadow: none; }
   .sidebar.open { transform: translateX(0); box-shadow: 8px 0 32px rgba(0,0,0,0.4); }
-  .main { margin-left: 0; padding: 16px 14px 60px; }
+  .main { margin-left: 0; }
+}
+
+@media (max-width: 768px) {
+  /* spazio per la bottom-nav: l'ultimo contenuto resta raggiungibile */
+  .main { padding: 16px 14px calc(84px + env(safe-area-inset-bottom)); }
+  .bottom-nav { display: flex; }
+
+  .header { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .form-card { padding: 16px; }
+  .section-title { font-size: 22px; }
+  .chart-wrap { height: 220px; }
+
+  /* tabelle larghe: scroll orizzontale invece di schiacciarsi */
+  .table-wrap .data-table { min-width: 560px; }
+
+  /* filtri: i gruppi si dividono la riga */
+  .filters-bar .filter-group { flex: 1 1 45%; min-width: 0; }
+  .filters-bar .filter-select { width: 100%; }
+
+  /* modali: centrate, corpo scrollabile */
+  .modal-overlay { padding: 14px; align-items: center; }
+  .modal { width: 100% !important; max-height: calc(100vh - 60px); border-radius: 16px; }
+  .modal-body { max-height: none; flex: 1; min-height: 0; }
+
+  /* bottoni header di sezione a tutta larghezza disponibile */
+  .section-header .btn-primary, .section-header .btn-secondary { flex: 1; justify-content: center; }
+}
+
+@media (max-width: 480px) {
+  .kpi-grid { gap: 8px; }
+  .kpi-card { padding: 13px 14px; }
+  .kpi-value { font-size: 22px; }
+  .main { padding-left: 10px; padding-right: 10px; }
+  .card { padding: 14px; }
+}
+
+/* Tabelle mobile: riga di dettaglio espansa al tap */
+@media (max-width: 768px) {
+  tr.m-open td { border-bottom: none; background: var(--surface2); }
+  tr.m-detail td {
+    background: var(--surface2);
+    padding: 6px 14px 12px;
+    border-bottom: 1px solid var(--border2);
+  }
+  .m-detail-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 12.5px;
+  }
+  .m-detail-label {
+    color: var(--text-dim);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    min-width: 86px;
+    flex-shrink: 0;
+  }
+  .m-detail-val { min-width: 0; overflow-wrap: anywhere; }
+}
+
+/* Calendario presenze su schermi stretti: pill → pallini */
+@media (max-width: 560px) {
+  .pres-cal-grid { gap: 3px; }
+  .pres-cal-day { min-height: 52px; padding: 5px 4px; }
+  .pres-cal-day-num { margin-bottom: 4px; }
+  .pres-cal-pill {
+    font-size: 0;
+    width: 7px; height: 7px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .pres-elenco-row { flex-wrap: wrap; gap: 8px 10px; }
 }
 
 /* ─── PIVOT TABLE ────────────────────────────────────────── */
@@ -788,19 +915,6 @@ body.light .pivot-total td {
 
 /* Per corso */
 .pres-corso-card { margin-bottom: 12px; }
-.pres-corso-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 14px 16px;
-  background: var(--surface2);
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-}
-.pres-corso-name {
-  font-size: 14px; font-weight: 500; flex: 1;
-}
-.pres-corso-stats {
-  font-size: 12px; color: var(--text-muted);
-}
 
 /* Checklist modal */
 .pres-checklist {
@@ -881,7 +995,7 @@ body.light .pivot-total td {
   html, body { background: #fff !important; color: #111 !important; margin: 0; }
 
   /* nascondi tutto tranne la nota mensile */
-  .header, .sidebar, .section-header { display: none !important; }
+  .header, .sidebar, .sidebar-overlay, .bottom-nav, .section-header { display: none !important; }
   .main { margin: 0 !important; padding: 16px !important; }
   .section { display: none !important; }
   #sec-nota-mensile { display: block !important; padding: 0 !important; }

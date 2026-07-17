@@ -3,7 +3,7 @@
    ═══════════════════════════════════════════════════════ */
 
 // ── CONFIGURAZIONE ───────────────────────────────────────
-import { auth, requireAuth, fsLoad, fsAdd, fsUpdate, fsDelete, signOut } from './db.js';
+import { auth, requireAuth, fsLoad, fsAdd, fsAddMany, fsUpdate, fsDelete, signOut } from './db.js?v=9';
 
 const COLL_SPESE      = 'spese';
 const COLL_CORSI      = 'corsi';
@@ -12,7 +12,7 @@ const COLL_ISCRIZIONI = 'iscrizioni';
 const COLL_PRESENZE   = 'presenze';
 
 const CAT_USCITE  = ['Affitto','Arredamento','Bollette','Cibo','Contributo collaboratore','Contributo team','Corsi di aggiornamento','Manutenzione','Strumenti','Utilità','Tasse','Trasporti','Versamento','Altro'];
-const CAT_ENTRATE = ['Allievi','Sponsor','Versamento','Altro'];
+const CAT_ENTRATE = ['Allievi','Tesseramento','Sponsor','Versamento','Altro'];
 
 // ── STATO ────────────────────────────────────────────────
 let speseData     = [];
@@ -29,8 +29,8 @@ let editRowIndex  = null;
 const CASSA_SEED = 233.91; // saldo cassa a inizio luglio 2023
 
 let chartDash      = null;
-let chartCatDash   = null;
 let chartAnnuale   = null;
+let chartRepPres   = null;
 let chartAnnualeCat= null;
 let chartGeneraleArea = null;
 let chartWaterfall = null;
@@ -62,6 +62,104 @@ const parseNum = (v) => {
 
 const $ = (id) => document.getElementById(id);
 
+// ── DIALOGHI (al posto di alert/confirm nativi) ──────────
+let dialogResolve = null;
+
+function openDialog(msg, showCancel) {
+  return new Promise(resolve => {
+    dialogResolve = resolve;
+    $('dialogMsg').textContent = msg;
+    $('dialogCancel').style.display = showCancel ? '' : 'none';
+    $('modalDialogOverlay').style.display = 'flex';
+    $('dialogOk').focus();
+  });
+}
+
+function closeDialog(val) {
+  $('modalDialogOverlay').style.display = 'none';
+  const r = dialogResolve;
+  dialogResolve = null;
+  if (r) r(val);
+}
+
+const appAlert   = (msg) => openDialog(msg, false);
+const appConfirm = (msg) => openDialog(msg, true);
+
+// ── TABELLE MOBILE: colonne prioritarie + tap per dettagli ──
+// keep = colonne (1-based) visibili su mobile; le altre compaiono toccando la riga
+const MOBILE_COLS = {
+  speseTable:      { keep: [1, 2, 5] },   // Data, Descrizione, Importo
+  allieviTable:    { keep: [1, 2] },      // Nome, Tipo
+  iscrizioniTable: { keep: [1, 5, 8] },   // Allievo, Corso, Costo
+  corsiTable:      { keep: [1, 3] },      // Nome, Lezione singola
+  repPresTable:    { keep: [1, 2, 3] },   // Data, Corso, Presenti
+};
+
+function initMobileTables() {
+  // regole di occultamento generate dalla config (unica fonte di verità)
+  let css = '@media (max-width: 768px) {';
+  for (const [id, cfg] of Object.entries(MOBILE_COLS)) {
+    const nots = cfg.keep.map(n => `:not(:nth-child(${n}))`).join('');
+    css += `
+      #${id} { min-width: 0 !important; }
+      #${id} thead th${nots}, #${id} tbody tr:not(.m-detail) td${nots} { display: none; }
+      #${id} tbody tr:not(.m-detail):not(.m-open) { cursor: pointer; }
+    `;
+  }
+  css += '}';
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+
+  // tap sulla riga → riga di dettaglio con le colonne nascoste
+  document.addEventListener('click', e => {
+    if (window.innerWidth > 768) return;
+    const tr = e.target.closest('tr');
+    if (!tr || tr.closest('thead') || tr.classList.contains('m-detail')) return;
+    const table = tr.closest('table');
+    if (!table || !MOBILE_COLS[table.id]) return;
+    if (e.target.closest('[onclick], button, a, input, select')) return;
+
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains('m-detail')) {
+      next.remove();
+      tr.classList.remove('m-open');
+      return;
+    }
+    table.querySelectorAll('tr.m-detail').forEach(x => x.remove());
+    table.querySelectorAll('tr.m-open').forEach(x => x.classList.remove('m-open'));
+
+    const keep = MOBILE_COLS[table.id].keep;
+    const ths  = [...table.querySelectorAll('thead th')];
+    const parts = [...tr.children].map((td, i) => {
+      if (keep.includes(i + 1)) return '';
+      const label = (ths[i]?.textContent || '').replace(/[↕↑↓]/g, '').trim();
+      const val = td.innerHTML.trim();
+      if (!val) return '';
+      return `<div class="m-detail-row">${label ? `<span class="m-detail-label">${escHtml(label)}</span>` : ''}<span class="m-detail-val">${val}</span></div>`;
+    }).join('');
+    if (!parts) return;
+
+    const det = document.createElement('tr');
+    det.className = 'm-detail';
+    det.innerHTML = `<td colspan="${keep.length}">${parts}</td>`;
+    tr.classList.add('m-open');
+    tr.after(det);
+  });
+}
+
+function initDialog() {
+  $('dialogOk').addEventListener('click', () => closeDialog(true));
+  $('dialogCancel').addEventListener('click', () => closeDialog(false));
+  $('modalDialogOverlay').addEventListener('click', e => { if (e.target === $('modalDialogOverlay')) closeDialog(false); });
+  document.addEventListener('keydown', e => {
+    if ($('modalDialogOverlay').style.display === 'flex') {
+      if (e.key === 'Escape') closeDialog(false);
+      if (e.key === 'Enter')  closeDialog(true);
+    }
+  });
+}
+
 const SPIN_SVG = `<svg class="spin" width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="rgba(255,255,255,0.1)" stroke-width="2.5"/><path d="M10 2a8 8 0 0 1 8 8" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/></svg>`;
 const LOADING_HTML = `<div class="table-loading">${SPIN_SVG} Caricamento…</div>`;
 
@@ -79,6 +177,21 @@ async function loadSpese() {
   })).filter(r => r.costo !== 0 || r.descrizione);
 }
 
+// Normalizza i valori booleani ereditati dal vecchio Sheet (false/true → No/Sì)
+// e ripara il documento su Firestore la prima volta che lo incontra.
+function normalizzaTesseramento(r) {
+  const raw = r.tesseramento;
+  const s = String(raw).trim().toLowerCase();
+  let fixed = null;
+  if (raw === false || s === 'false') fixed = 'No';
+  else if (raw === true || s === 'true') fixed = 'Sì';
+  if (fixed !== null) {
+    fsUpdate(COLL_ALLIEVI, r._id, { tesseramento: fixed }).catch(() => {});
+    return fixed;
+  }
+  return raw || '';
+}
+
 async function loadAllievi() {
   const rows = await fsLoad(COLL_ALLIEVI);
   allieviData = rows.map(r => ({
@@ -87,7 +200,7 @@ async function loadAllievi() {
     nome: r.nome || '',
     nomeCompleto: r.nomeCompleto || `${r.cognome || ''} ${r.nome || ''}`.trim(),
     tipo: r.tipo || '',
-    tesseramento: r.tesseramento || '',
+    tesseramento: normalizzaTesseramento(r),
     cellulare: r.cellulare || '',
     mail: r.mail || '',
     indirizzo: r.indirizzo || '',
@@ -115,11 +228,16 @@ async function loadCorsi() {
   const rows = await fsLoad(COLL_CORSI);
   corsiData = rows.map(r => ({
     _id: r._id,
-    nome:  r.nome || '',
-    prova: parseNum(r.prova),
-    x1:    parseNum(r.x1),
-    x5:    parseNum(r.x5),
-    x10:   parseNum(r.x10),
+    nome:   r.nome || '',
+    durata: r.durata || '',
+    prova:  parseNum(r.prova),
+    x1:     parseNum(r.x1),
+    x4:     parseNum(r.x4),
+    x8:     parseNum(r.x8),
+    x12:    parseNum(r.x12),
+    // legacy: vecchi pacchetti ancora presenti in iscrizioni storiche
+    x5:     parseNum(r.x5),
+    x10:    parseNum(r.x10),
   })).filter(r => r.nome).sort((a,b) => a.nome.localeCompare(b.nome, 'it'));
 }
 
@@ -135,15 +253,14 @@ async function loadPresenze() {
 }
 
 // ── NAVIGAZIONE ──────────────────────────────────────────
-const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','iscrizioni','presenze','riepilogo-allievo','compensi','nota-mensile'];
+const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','corsi','iscrizioni','presenze','riepilogo-allievo','compensi','nota-mensile','report-presenze'];
 
 function showSection(name) {
-  sections.forEach(s => {
-    $('sec-'+s)?.classList.remove('active');
-    document.querySelector(`[data-section="${s}"]`)?.classList.remove('active');
+  sections.forEach(s => { $('sec-'+s)?.classList.remove('active'); });
+  document.querySelectorAll('[data-section]').forEach(el => {
+    el.classList.toggle('active', el.dataset.section === name);
   });
   $('sec-'+name)?.classList.add('active');
-  document.querySelector(`[data-section="${name}"]`)?.classList.add('active');
 
   if (name === 'dashboard')   renderDashboard();
   if (name === 'elenco')      renderElenco();
@@ -151,14 +268,18 @@ function showSection(name) {
   if (name === 'generale')    renderGenerale();
   if (name === 'tabelle')     renderTabelle();
   if (name === 'allievi')     renderAllievi();
+  if (name === 'corsi')       renderCorsi();
   if (name === 'iscrizioni')  renderIscrizioni();
   if (name === 'presenze')    renderPresenze();
   if (name === 'riepilogo-allievo') renderRiepilogoSection();
   if (name === 'compensi')        renderCompensi();
   if (name === 'nota-mensile')    renderNotaMensile();
+  if (name === 'report-presenze') renderReportPresenze();
 
-  if (window.innerWidth <= 768) {
+  if (window.innerWidth <= 1024) {
     $('sidebar').classList.remove('open');
+    $('sidebarOverlay')?.classList.remove('show');
+    window.scrollTo({ top: 0 });
   }
 }
 
@@ -172,19 +293,98 @@ function renderDashboard() {
   $('dashLoadingCover').style.display = 'none';
   $('dashContent').style.display = '';
 
-  const entrate = speseData.filter(r => r.tipo === 'Entrate').reduce((s,r) => s+r.costo, 0);
-  const uscite  = speseData.filter(r => r.tipo === 'Uscite').reduce((s,r) => s+r.costo, 0);
+  // Allievi attivi = iscritti nell'anno accademico corrente
+  const asCorrente = currentAnnoScolastico();
+  const attivi = new Set(iscrizioniData.filter(r => r.as === asCorrente).map(r => r.allievo)).size;
+  $('kpiAllievi').textContent = attivi || '—';
+  $('kpiAllieviAS').textContent = `· ${asCorrente}`;
+
+  // Entrate / uscite / saldo del mese corrente
+  const now = new Date();
+  const delMese = speseData.filter(r => r.data && r.data.getFullYear() === now.getFullYear() && r.data.getMonth() === now.getMonth());
+  const entrate = delMese.filter(r => r.tipo === 'Entrate').reduce((s,r) => s+r.costo, 0);
+  const uscite  = delMese.filter(r => r.tipo === 'Uscite').reduce((s,r) => s+r.costo, 0);
   const saldo   = entrate - uscite;
 
-  $('kpiAllievi').textContent = allieviData.length || '—';
   $('kpiEntrate').textContent = fmt(entrate);
   $('kpiUscite').textContent  = fmt(uscite);
   $('kpiSaldo').textContent   = fmt(saldo);
   $('kpiSaldo').className     = 'kpi-value ' + (saldo >= 0 ? 'kpi-green' : 'kpi-red');
   $('kpiCassa').textContent   = fmt(calcCassaCorrente());
 
+  renderDashDaSaldare();
+  renderDashProssime();
   renderChartDash();
-  renderChartCatDash();
+}
+
+function renderDashDaSaldare() {
+  const el = $('dashDaSaldare');
+  const daSaldare = iscrizioniData
+    .filter(r => !isPagato(r.pagato))
+    .sort((a,b) => String(b.data).localeCompare(String(a.data)));
+
+  if (!daSaldare.length) {
+    el.innerHTML = '<p style="color:var(--green);font-size:13px;padding:6px 0;">✓ Tutte le iscrizioni sono saldate.</p>';
+    return;
+  }
+
+  const tot = daSaldare.reduce((s,r) => s + (r.costo||0), 0);
+  el.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">${daSaldare.length} iscrizioni · ${fmt(tot)} da incassare</div>
+    <div style="max-height:260px;overflow-y:auto;">
+      ${daSaldare.map(r => `
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <span style="cursor:pointer;color:var(--accent);text-decoration:underline;text-underline-offset:3px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')">${escHtml(r.allievo)}</span>
+          <span style="color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(r.corso)} (${escHtml(r.tipo)})</span>
+          <span style="color:var(--red);font-variant-numeric:tabular-nums;white-space:nowrap;">${r.costo ? fmt(r.costo) : '—'}</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+// Stima prossima lezione per corso: ultima presenza + multipli di 7 giorni.
+// Corsi senza presenze negli ultimi 30 giorni = considerati inattivi.
+function renderDashProssime() {
+  const el = $('dashProssime');
+  const oggi = new Date(); oggi.setHours(0,0,0,0);
+
+  const ultimaPerCorso = {};
+  presenzeData.forEach(p => {
+    const d = new Date(p.giorno);
+    if (isNaN(d)) return;
+    if (!ultimaPerCorso[p.corso] || d > ultimaPerCorso[p.corso]) ultimaPerCorso[p.corso] = d;
+  });
+
+  const GIORNI = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  const prossime = Object.entries(ultimaPerCorso)
+    .filter(([,d]) => (oggi - d) / 86400000 <= 30)
+    .map(([corso, ultima]) => {
+      const next = new Date(ultima);
+      while (next < oggi) next.setDate(next.getDate() + 7);
+      return { corso, next };
+    })
+    .sort((a,b) => a.next - b.next);
+
+  if (!prossime.length) {
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:6px 0;">Nessun corso con presenze recenti.</p>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="max-height:260px;overflow-y:auto;">
+      ${prossime.map(p => {
+        const isOggi = p.next.getTime() === oggi.getTime();
+        return `
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <span class="badge ${isOggi ? 'badge-green' : 'badge-gold'}" style="white-space:nowrap;">${isOggi ? 'Oggi' : GIORNI[p.next.getDay()]}</span>
+          <span style="color:var(--text-muted);font-size:12px;white-space:nowrap;">${fmtDate(p.next.toISOString().slice(0,10))}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(p.corso)}</span>
+          <button class="btn-table" title="Registra presenza" onclick="openPresForDay('${p.next.getFullYear()}-${String(p.next.getMonth()+1).padStart(2,'0')}-${String(p.next.getDate()).padStart(2,'0')}', ${JSON.stringify(p.corso).replace(/"/g,'&quot;')})">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6.5l2.5 2.5L10 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 function renderChartDash() {
@@ -211,22 +411,6 @@ function renderChartDash() {
   });
 }
 
-function renderChartCatDash() {
-  const cats = {};
-  speseData.filter(r => r.tipo==='Uscite').forEach(r => { cats[r.categoria] = (cats[r.categoria]||0)+r.costo; });
-  const sorted = Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,6);
-
-  if (chartCatDash) chartCatDash.destroy();
-  chartCatDash = new Chart($('chartCatDash'), {
-    type: 'doughnut',
-    data: {
-      labels: sorted.map(e=>e[0]),
-      datasets: [{ data: sorted.map(e=>e[1]), backgroundColor: donutColors(), borderWidth: 0, hoverOffset: 6 }]
-    },
-    options: { ...donutOpts(), plugins: { ...donutOpts().plugins, legend: { position: 'bottom', labels: { color: '#888', font: { size: 11 }, boxWidth: 10, padding: 12 } } } }
-  });
-}
-
 // ── INSERIMENTO SPESA ─────────────────────────────────────
 const PAG_OPTIONS = ['Contanti','Bonifico','Carta','PayPal','Satispay','Altro'];
 
@@ -247,6 +431,15 @@ function initInserimento() {
   renderPagGrid();
   $('btnReset').addEventListener('click', resetForm);
   $('btnSubmit').addEventListener('click', submitSpesa);
+
+  // descrizione precompilata quando scegli l'allievo da tesserare
+  $('fTessAllievo')?.addEventListener('change', () => {
+    const nome = $('fTessAllievo').value;
+    const desc = $('fDescrizione');
+    if (nome && (!desc.value.trim() || desc.value.startsWith('Tesseramento '))) {
+      desc.value = `Tesseramento ${nome}`;
+    }
+  });
 }
 
 function renderCatGrid(forType) {
@@ -261,8 +454,27 @@ function renderCatGrid(forType) {
       currentCat = chip.dataset.cat;
       grid.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
+      updateTessAllievoGroup();
     });
   });
+  updateTessAllievoGroup();
+}
+
+// Categoria "Tesseramento": mostra la tendina allievi
+async function updateTessAllievoGroup() {
+  const grp = $('tessAllievoGroup');
+  if (!grp) return;
+  const show = currentCat === 'Tesseramento';
+  grp.style.display = show ? '' : 'none';
+  if (!show) { $('fTessAllievo').value = ''; return; }
+  if (!allieviData.length) await loadAllievi();
+  const cur = $('fTessAllievo').value;
+  $('fTessAllievo').innerHTML = '<option value="">— seleziona allievo —</option>' +
+    allieviData.slice()
+      .sort((a,b) => a.nomeCompleto.localeCompare(b.nomeCompleto,'it'))
+      .map(a => `<option value="${escHtml(a.nomeCompleto)}">${escHtml(a.nomeCompleto)}${isTesserato(a.tesseramento) ? ' — già tesserato' : ''}</option>`)
+      .join('');
+  $('fTessAllievo').value = cur;
 }
 
 function renderPagGrid() {
@@ -306,15 +518,33 @@ async function submitSpesa() {
   $('btnSubmit').disabled = true;
   showFeedback('Salvataggio…');
 
+  const tessAllievo = currentCat === 'Tesseramento' ? ($('fTessAllievo')?.value || '') : '';
+
   try {
     const id = await fsAdd(COLL_SPESE, { data, costo, descrizione, categoria: currentCat, tipo: currentType, pagamento: currentPag });
-    $('btnSubmit').disabled = false;
-    showFeedback('✓ Salvato correttamente!');
     speseData.push({
       _id: id,
       data: new Date(data),
       costo, descrizione, categoria: currentCat, tipo: currentType, pagamento: currentPag
     });
+
+    // aggiorna il tesseramento dell'allievo selezionato
+    let extra = '';
+    if (tessAllievo) {
+      const a = allieviData.find(x => x.nomeCompleto === tessAllievo);
+      if (a) {
+        try {
+          await fsUpdate(COLL_ALLIEVI, a._id, { tesseramento: 'Sì' });
+          a.tesseramento = 'Sì';
+          extra = ` Tesseramento di ${tessAllievo}: Sì.`;
+        } catch (e) {
+          extra = ` (aggiornamento tesseramento di ${tessAllievo} fallito)`;
+        }
+      }
+    }
+
+    $('btnSubmit').disabled = false;
+    showFeedback('✓ Salvato correttamente!' + extra);
     resetForm();
   } catch (e) {
     $('btnSubmit').disabled = false;
@@ -328,8 +558,194 @@ function showFeedback(msg, isError = false) {
   el.className   = 'form-feedback' + (isError ? ' error' : '');
 }
 
+// ── IMPORT CSV ────────────────────────────────────────────
+let csvValidDocs = [];
+
+function initCsvImport() {
+  const closeCsvModal = () => {
+    $('modalCsvOverlay').style.display = 'none';
+    csvValidDocs = [];
+    $('csvPreview').innerHTML = '';
+  };
+  $('btnImportCsv')?.addEventListener('click', () => { $('modalCsvOverlay').style.display = 'flex'; });
+  $('modalCsvClose')?.addEventListener('click', closeCsvModal);
+  $('modalCsvOverlay')?.addEventListener('click', e => { if (e.target === $('modalCsvOverlay')) closeCsvModal(); });
+
+  $('btnCsvTemplate')?.addEventListener('click', downloadCsvTemplate);
+  $('btnCsvPick')?.addEventListener('click', () => $('csvFile').click());
+  $('csvFile')?.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => previewCsv(reader.result);
+    reader.readAsText(file);
+    e.target.value = ''; // permette di riselezionare lo stesso file
+  });
+}
+
+function downloadCsvTemplate() {
+  const oggi = fmtDate(new Date().toISOString().slice(0,10));
+  const lines = [
+    'Data;Importo;Descrizione;Categoria;Tipo;Pagamento',
+    `${oggi};25,50;Esempio uscita;Affitto;Uscite;Contanti`,
+    `${oggi};100;Esempio entrata;Allievi;Entrate;Bonifico`,
+  ];
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'modello_entrate_uscite.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Parser CSV con supporto virgolette; separatore auto (';' o ',')
+function parseCsvText(text) {
+  text = text.replace(/^﻿/, '');
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const sep = (firstLine.match(/;/g)||[]).length >= (firstLine.match(/,/g)||[]).length ? ';' : ',';
+
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i+1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === sep) {
+      row.push(field); field = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i+1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(f => f.trim() !== '')) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  row.push(field);
+  if (row.some(f => f.trim() !== '')) rows.push(row);
+  return rows;
+}
+
+// 'GG/MM/AAAA' o 'AAAA-MM-GG' → 'AAAA-MM-GG'; null se invalida
+function csvParseData(v) {
+  v = String(v || '').trim();
+  let m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    const d = parseInt(m[1]), mo = parseInt(m[2]), y = parseInt(m[3]);
+    const dt = new Date(y, mo-1, d);
+    if (dt.getFullYear()!==y || dt.getMonth()!==mo-1 || dt.getDate()!==d) return null;
+    return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+  m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const dt = new Date(v);
+    return isNaN(dt) ? null : v;
+  }
+  return null;
+}
+
+// Match case-insensitive contro lista canonica; null se assente
+function csvCanon(v, list) {
+  v = String(v || '').trim();
+  if (!v) return null;
+  return list.find(x => x.toLowerCase() === v.toLowerCase()) || null;
+}
+
+function previewCsv(text) {
+  const el = $('csvPreview');
+  csvValidDocs = [];
+  let rows;
+  try { rows = parseCsvText(text); }
+  catch (e) { el.innerHTML = '<div class="form-feedback error">File non leggibile.</div>'; return; }
+
+  if (!rows.length) { el.innerHTML = '<div class="form-feedback error">File vuoto.</div>'; return; }
+
+  // salta intestazione se presente
+  const h0 = (rows[0][0]||'').toLowerCase();
+  if (h0.includes('data')) rows = rows.slice(1);
+
+  const errors = [];
+  rows.forEach((r, i) => {
+    const nr = i + 1;
+    const data  = csvParseData(r[0]);
+    const costo = parseNum(r[1]);
+    const descrizione = String(r[2]||'').trim();
+    const tipoRaw = String(r[4]||'').trim().toLowerCase();
+    const tipo = ['uscite','uscita'].includes(tipoRaw) ? 'Uscite'
+               : ['entrate','entrata'].includes(tipoRaw) ? 'Entrate' : null;
+    const catList = tipo === 'Entrate' ? CAT_ENTRATE : CAT_USCITE;
+    const categoria = csvCanon(r[3], catList);
+    const pagRaw = String(r[5]||'').trim();
+    const pagamento = pagRaw ? csvCanon(pagRaw, PAG_OPTIONS) : '';
+
+    if (!data)        errors.push(`Riga ${nr}: data non valida ("${r[0]||''}")`);
+    if (!costo || costo <= 0) errors.push(`Riga ${nr}: importo non valido ("${r[1]||''}")`);
+    if (!descrizione) errors.push(`Riga ${nr}: descrizione mancante`);
+    if (!tipo)        errors.push(`Riga ${nr}: tipo deve essere Entrate o Uscite ("${r[4]||''}")`);
+    if (tipo && !categoria) errors.push(`Riga ${nr}: categoria "${r[3]||''}" non valida per ${tipo}`);
+    if (pagRaw && pagamento === null) errors.push(`Riga ${nr}: pagamento "${pagRaw}" non valido (${PAG_OPTIONS.join(', ')})`);
+
+    if (data && costo > 0 && descrizione && tipo && categoria && pagamento !== null) {
+      csvValidDocs.push({ data, costo, descrizione, categoria, tipo, pagamento: pagamento || '' });
+    }
+  });
+
+  const previewRows = csvValidDocs.slice(0, 10).map(d => `
+    <tr>
+      <td>${fmtDate(d.data)}</td>
+      <td>${escHtml(d.descrizione)}</td>
+      <td>${escHtml(d.categoria)}</td>
+      <td><span class="badge ${d.tipo==='Entrate'?'badge-green':'badge-red'}">${d.tipo}</span></td>
+      <td style="text-align:right">${fmt(d.costo)}</td>
+      <td style="color:var(--text-muted)">${escHtml(d.pagamento)}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    ${errors.length ? `<div style="font-size:12px;color:var(--red);margin-bottom:10px;max-height:140px;overflow-y:auto;">${errors.map(escHtml).join('<br>')}</div>` : ''}
+    ${csvValidDocs.length ? `
+      <div class="table-wrap" style="margin-top:0;">
+        <table class="data-table">
+          <thead><tr><th>Data</th><th>Descrizione</th><th>Categoria</th><th>Tipo</th><th style="text-align:right">Importo</th><th>Pagamento</th></tr></thead>
+          <tbody>${previewRows}</tbody>
+        </table>
+      </div>
+      ${csvValidDocs.length > 10 ? `<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">…e altre ${csvValidDocs.length - 10} righe</div>` : ''}
+      <div class="form-actions" style="justify-content:flex-start;margin-top:14px;">
+        <button class="btn-primary" id="btnCsvImport">Importa ${csvValidDocs.length} righe${errors.length ? ' valide' : ''}</button>
+        <button class="btn-secondary" id="btnCsvCancel">Annulla</button>
+      </div>` : '<div class="form-feedback error">Nessuna riga valida da importare.</div>'}
+  `;
+
+  $('btnCsvImport')?.addEventListener('click', importCsvRows);
+  $('btnCsvCancel')?.addEventListener('click', () => { csvValidDocs = []; el.innerHTML = ''; });
+}
+
+async function importCsvRows() {
+  if (!csvValidDocs.length) return;
+  const btn = $('btnCsvImport');
+  btn.disabled = true;
+  btn.textContent = 'Importazione…';
+  try {
+    const ids = await fsAddMany(COLL_SPESE, csvValidDocs);
+    csvValidDocs.forEach((d, i) => {
+      speseData.push({ _id: ids[i], ...d, data: new Date(d.data) });
+    });
+    $('csvPreview').innerHTML = `<div class="form-feedback">✓ Importate ${csvValidDocs.length} righe.</div>`;
+    csvValidDocs = [];
+    renderElenco(); // aggiorna tabella e filtri sotto la modale
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Riprova';
+    $('csvPreview').insertAdjacentHTML('beforeend', '<div class="form-feedback error">Errore durante l\'importazione.</div>');
+  }
+}
+
 // ── ELENCO SPESE ──────────────────────────────────────────
-let sortCol = 0, sortAsc = false;
+let sortAsc = false;
 
 function renderElenco() {
   const loading = $('tableLoading');
@@ -492,18 +908,18 @@ async function saveEdit() {
     if (r) { r.data=new Date(upd.data); r.costo=upd.costo; r.descrizione=upd.descrizione; r.categoria=upd.categoria; r.tipo=upd.tipo; r.pagamento=upd.pagamento; }
     closeModal(); applyFilters();
   } catch (e) {
-    alert('Errore durante il salvataggio.');
+    appAlert('Errore durante il salvataggio.');
   }
 }
 
 async function deleteRow(id) {
-  if (!confirm('Eliminare questa voce?')) return;
+  if (!await appConfirm('Eliminare questa voce?')) return;
   try {
     await fsDelete(COLL_SPESE, id);
     speseData = speseData.filter(r => r._id !== id);
     applyFilters();
   } catch (e) {
-    alert('Errore durante l\'eliminazione.');
+    appAlert('Errore durante l\'eliminazione.');
   }
 }
 
@@ -1063,12 +1479,21 @@ async function renderAllievi() {
   applyAllieviFilters();
 }
 
+// tesseramento valorizzato (e diverso da "no") = tesserato
+function isTesserato(v) {
+  const s = String(v || '').trim().toLowerCase();
+  return s !== '' && s !== 'no' && s !== 'n';
+}
+
 function applyAllieviFilters() {
   const search = $('searchAllievi').value.toLowerCase();
   const tipo   = $('filterTipoAllievo').value;
+  const tess   = $('filterTesseramento').value;
   let filtered = allieviData.filter(r => {
     if (search && !r.nomeCompleto.toLowerCase().includes(search) && !r.mail.toLowerCase().includes(search)) return false;
     if (tipo && r.tipo !== tipo) return false;
+    if (tess === 'si' && !isTesserato(r.tesseramento)) return false;
+    if (tess === 'no' &&  isTesserato(r.tesseramento)) return false;
     return true;
   });
 
@@ -1119,7 +1544,8 @@ function setTipoChip(val) {
 function openNewAllievo() {
   editAllieviIdx = null;
   $('modalAllieviTitle').textContent = 'Nuovo allievo';
-  ['aCognome','aNome','aTesseramento','aCellulare','aMail','aIndirizzo','aNote'].forEach(id => { $(id).value=''; });
+  ['aCognome','aNome','aCellulare','aMail','aIndirizzo','aNote'].forEach(id => { $(id).value=''; });
+  $('aTesseramento').value = 'No';
   setTipoChip('');
   $('modalAllieviOverlay').style.display = 'flex';
   $('aCognome').focus();
@@ -1132,7 +1558,7 @@ function openEditAllievo(id) {
   $('modalAllieviTitle').textContent = 'Modifica allievo';
   $('aCognome').value      = r.cognome;
   $('aNome').value         = r.nome;
-  $('aTesseramento').value = r.tesseramento;
+  $('aTesseramento').value = isTesserato(r.tesseramento) ? 'Sì' : 'No';
   $('aCellulare').value    = r.cellulare;
   $('aMail').value         = r.mail;
   $('aIndirizzo').value    = r.indirizzo;
@@ -1154,12 +1580,13 @@ async function saveAllievo() {
   const note        = $('aNote').value.trim();
   const nomeCompleto= `${cognome} ${nome}`.trim();
 
-  if (!cognome && !nome) return alert('Inserisci almeno cognome o nome.');
+  if (!cognome && !nome) return appAlert('Inserisci almeno cognome o nome.');
 
   const docData = { cognome, nome, nomeCompleto, tipo, tesseramento, cellulare, mail, indirizzo, note };
 
   try {
-    if (editAllieviIdx === null) {
+    const isNuovo = editAllieviIdx === null;
+    if (isNuovo) {
       const id = await fsAdd(COLL_ALLIEVI, docData);
       allieviData.push({ _id: id, ...docData });
     } else {
@@ -1169,22 +1596,143 @@ async function saveAllievo() {
     }
     closeAllieviModal();
     applyAllieviFilters();
+
+    // nuovo allievo → proponi subito l'iscrizione
+    if (isNuovo && await appConfirm(`Allievo "${nomeCompleto}" salvato.\nVuoi procedere subito con l'iscrizione?`)) {
+      if (!corsiData.length) await loadCorsi();
+      populateAllieviDatalist();
+      openNuovaIscrizione();
+      $('iAllievo').value = nomeCompleto;
+    }
   } catch (e) {
-    alert('Errore durante il salvataggio.');
+    appAlert('Errore durante il salvataggio.');
   }
 }
 
 async function deleteAllievo(id) {
   const r = allieviData.find(r => r._id === id);
   if (!r) return;
-  const ok = confirm(`Eliminare l'allievo "${r.nomeCompleto}"?\nQuesta operazione non può essere annullata.`);
+  const ok = await appConfirm(`Eliminare l'allievo "${r.nomeCompleto}"?\nQuesta operazione non può essere annullata.`);
   if (!ok) return;
   try {
     await fsDelete(COLL_ALLIEVI, id);
     allieviData = allieviData.filter(r => r._id !== id);
     applyAllieviFilters();
   } catch (e) {
-    alert('Errore durante l\'eliminazione.');
+    appAlert('Errore durante l\'eliminazione.');
+  }
+}
+
+// ── CORSI ─────────────────────────────────────────────────
+let editCorsoId = null;
+
+async function renderCorsi() {
+  $('corsiLoading').style.display=''; $('corsiLoading').innerHTML = LOADING_HTML;
+  $('corsiTableWrap').style.display='none'; $('corsiEmpty').style.display='none';
+  if (!corsiData.length) await loadCorsi();
+  $('corsiLoading').style.display='none';
+
+  if (!corsiData.length) { $('corsiEmpty').style.display=''; return; }
+  $('corsiTableWrap').style.display='';
+
+  const cell = (v) => v ? fmt(v) : '<span style="color:var(--text-dim)">—</span>';
+  $('corsiBody').innerHTML = corsiData.map(c => `
+    <tr>
+      <td style="font-weight:500">${escHtml(c.nome)}</td>
+      <td style="color:var(--text-muted)">${escHtml(c.durata) || '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${cell(c.x1)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${cell(c.x4)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${cell(c.x8)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${cell(c.x12)}</td>
+      <td>
+        <div style="display:flex;gap:4px;">
+          <button class="btn-table" onclick="openEditCorso('${c._id}')" title="Modifica">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="btn-table btn-del" onclick="deleteCorso('${c._id}')" title="Elimina">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M5 3V2h2v1M4 3v6M8 3v6M3 3l.5 7h5L9 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function openNewCorso() {
+  editCorsoId = null;
+  $('modalCorsoTitle').textContent = 'Nuovo corso';
+  ['cNome','cDurata','cX1','cX4','cX8','cX12'].forEach(id => { $(id).value=''; });
+  $('modalCorsoOverlay').style.display = 'flex';
+  $('cNome').focus();
+}
+
+function openEditCorso(id) {
+  const c = corsiData.find(c => c._id === id);
+  if (!c) return;
+  editCorsoId = id;
+  $('modalCorsoTitle').textContent = 'Modifica corso';
+  $('cNome').value   = c.nome;
+  $('cDurata').value = c.durata;
+  $('cX1').value  = c.x1  || '';
+  $('cX4').value  = c.x4  || '';
+  $('cX8').value  = c.x8  || '';
+  $('cX12').value = c.x12 || '';
+  $('modalCorsoOverlay').style.display = 'flex';
+}
+
+function closeCorsoModal() { $('modalCorsoOverlay').style.display = 'none'; editCorsoId = null; }
+
+async function saveCorso() {
+  const nome   = $('cNome').value.trim();
+  const durata = $('cDurata').value.trim();
+  const x1  = parseFloat($('cX1').value)  || 0;
+  const x4  = parseFloat($('cX4').value)  || 0;
+  const x8  = parseFloat($('cX8').value)  || 0;
+  const x12 = parseFloat($('cX12').value) || 0;
+
+  if (!nome) return appAlert('Inserisci il nome del corso.');
+
+  const docData = { nome, durata, x1, x4, x8, x12 };
+
+  // rinomina: iscrizioni e presenze puntano al corso per nome
+  if (editCorsoId !== null) {
+    const old = corsiData.find(c => c._id === editCorsoId);
+    if (old && old.nome !== nome) {
+      const usato = iscrizioniData.some(r => r.corso === old.nome) || presenzeData.some(r => r.corso === old.nome);
+      if (usato && !await appConfirm(`Stai rinominando "${old.nome}" in "${nome}".\nLe iscrizioni e presenze esistenti restano legate al vecchio nome. Continuare?`)) return;
+    }
+  }
+
+  try {
+    if (editCorsoId === null) {
+      const id = await fsAdd(COLL_CORSI, docData);
+      corsiData.push({ _id: id, prova: 0, x5: 0, x10: 0, ...docData });
+    } else {
+      await fsUpdate(COLL_CORSI, editCorsoId, docData);
+      const c = corsiData.find(c => c._id === editCorsoId);
+      if (c) Object.assign(c, docData);
+    }
+    corsiData.sort((a,b) => a.nome.localeCompare(b.nome, 'it'));
+    closeCorsoModal();
+    renderCorsi();
+  } catch (e) {
+    appAlert('Errore durante il salvataggio.');
+  }
+}
+
+async function deleteCorso(id) {
+  const c = corsiData.find(c => c._id === id);
+  if (!c) return;
+  const usato = iscrizioniData.some(r => r.corso === c.nome) || presenzeData.some(r => r.corso === c.nome);
+  const msg = usato
+    ? `Il corso "${c.nome}" ha iscrizioni o presenze registrate (che NON verranno cancellate).\nEliminarlo comunque?`
+    : `Eliminare il corso "${c.nome}"?`;
+  if (!await appConfirm(msg)) return;
+  try {
+    await fsDelete(COLL_CORSI, id);
+    corsiData = corsiData.filter(c => c._id !== id);
+    renderCorsi();
+  } catch (e) {
+    appAlert('Errore durante l\'eliminazione.');
   }
 }
 
@@ -1192,6 +1740,10 @@ async function deleteAllievo(id) {
 const TIPO_ISC_COLORS = {
   'Prova': { bg:'rgba(91,192,222,0.12)',  border:'#5bc0de', text:'#5bc0de' },
   'x1':   { bg:'rgba(201,169,110,0.12)', border:'#c9a96e', text:'#c9a96e' },
+  'x4':   { bg:'rgba(230,126,34,0.12)',  border:'#e67e22', text:'#e67e22' },
+  'x8':   { bg:'rgba(155,89,182,0.12)',  border:'#9b59b6', text:'#9b59b6' },
+  'x12':  { bg:'rgba(92,184,92,0.12)',   border:'#5cb85c', text:'#5cb85c' },
+  // legacy (iscrizioni storiche)
   'x5':   { bg:'rgba(155,89,182,0.12)',  border:'#9b59b6', text:'#9b59b6' },
   'x10':  { bg:'rgba(92,184,92,0.12)',   border:'#5cb85c', text:'#5cb85c' },
 };
@@ -1271,7 +1823,7 @@ function isPagato(v) {
 function getCostoCorso(nomeCorso, tipo) {
   const corso = corsiData.find(c => c.nome === nomeCorso);
   if (!corso) return 0;
-  const map = { 'Prova': corso.prova, 'x1': corso.x1, 'x5': corso.x5, 'x10': corso.x10 };
+  const map = { 'Prova': corso.prova, 'x1': corso.x1, 'x4': corso.x4, 'x8': corso.x8, 'x12': corso.x12, 'x5': corso.x5, 'x10': corso.x10 };
   return map[tipo] || 0;
 }
 
@@ -1358,9 +1910,9 @@ async function saveIscrizione() {
   const costo   = parseFloat($('iCosto').value) || 0;
   const note    = $('iNote').value.trim();
 
-  if (!allievo) return alert('Seleziona un allievo.');
-  if (!tipo)    return alert('Seleziona il tipo.');
-  if (!corso)   return alert('Seleziona un corso.');
+  if (!allievo) return appAlert('Seleziona un allievo.');
+  if (!tipo)    return appAlert('Seleziona il tipo.');
+  if (!corso)   return appAlert('Seleziona un corso.');
 
   const docData = { allievo, as, data, tipo, corso, dataPag, pagato, costo, note };
 
@@ -1375,20 +1927,20 @@ async function saveIscrizione() {
     }
     closeIscModal(); applyIscrizioniFilters();
   } catch (e) {
-    alert('Errore durante il salvataggio.');
+    appAlert('Errore durante il salvataggio.');
   }
 }
 
 async function deleteIscrizione(id) {
   const r = iscrizioniData.find(r => r._id === id);
   if (!r) return;
-  if (!confirm(`Eliminare l'iscrizione di "${r.allievo}" — ${r.corso} (${r.tipo})?\nL'operazione non può essere annullata.`)) return;
+  if (!await appConfirm(`Eliminare l'iscrizione di "${r.allievo}" — ${r.corso} (${r.tipo})?\nL'operazione non può essere annullata.`)) return;
   try {
     await fsDelete(COLL_ISCRIZIONI, id);
     iscrizioniData = iscrizioniData.filter(r => r._id !== id);
     applyIscrizioniFilters();
   } catch (e) {
-    alert('Errore durante l\'eliminazione.');
+    appAlert('Errore durante l\'eliminazione.');
   }
 }
 
@@ -1665,9 +2217,13 @@ function getAllieviForCorso(nomeCorso) {
 // Helper: lezioni totali da tipo iscrizione
 function lezioniDaTipo(tipo) {
   if (tipo === 'x1')    return 1;
+  if (tipo === 'x4')    return 4;
+  if (tipo === 'x8')    return 8;
+  if (tipo === 'x12')   return 12;
+  if (tipo === 'Prova') return 1;
+  // legacy
   if (tipo === 'x5')    return 5;
   if (tipo === 'x10')   return 10;
-  if (tipo === 'Prova') return 1;
   return 0;
 }
 
@@ -1794,8 +2350,8 @@ async function savePresenza() {
   const giorno = document.getElementById('pGiorno').value;
   const corso  = document.getElementById('pCorso').value;
   const note   = document.getElementById('pNote').value.trim();
-  if (!giorno) return alert('Inserisci la data.');
-  if (!corso)  return alert('Seleziona un corso.');
+  if (!giorno) return appAlert('Inserisci la data.');
+  if (!corso)  return appAlert('Seleziona un corso.');
 
   const fromList = [...document.querySelectorAll('#presAllieviList input[type=checkbox]:checked')]
     .map(cb => cb.closest('.pres-check-item').dataset.nome)
@@ -1815,20 +2371,20 @@ async function savePresenza() {
     }
     closePresModal(); renderPresView();
   } catch (e) {
-    alert('Errore durante il salvataggio.');
+    appAlert('Errore durante il salvataggio.');
   }
 }
 
 async function deletePresenza(id) {
   const r = presenzeData.find(r=>r._id===id);
   if (!r) return;
-  if (!confirm(`Eliminare la presenza del ${fmtDate(r.giorno)} — ${r.corso}?`)) return;
+  if (!await appConfirm(`Eliminare la presenza del ${fmtDate(r.giorno)} — ${r.corso}?`)) return;
   try {
     await fsDelete(COLL_PRESENZE, id);
     presenzeData = presenzeData.filter(r=>r._id!==id);
     renderPresView();
   } catch (e) {
-    alert('Errore durante l\'eliminazione.');
+    appAlert('Errore durante l\'eliminazione.');
   }
 }
 
@@ -1848,9 +2404,7 @@ function initRiepilogoAllievo() {
     if (!presenzeData.length)   await loadPresenze();
     if (!corsiData.length)       await loadCorsi();
     if (!allieviData.length)     await loadAllievi();
-    // Popola datalist
-    const dl = $('riepilogoAllieviList');
-    if (dl) dl.innerHTML = allieviData.map(a=>`<option value="${escHtml(a.nomeCompleto)}">`).join('');
+    populateRiepilogoDatalist();
     document.getElementById('riepilogoAllievoTitolo').textContent = val;
     document.getElementById('riepilogoAllievoSub').textContent    = 'Storico iscrizioni, pagamenti e presenze.';
     renderRiepilogoAllievo(val);
@@ -1860,16 +2414,25 @@ function initRiepilogoAllievo() {
   input.addEventListener('keydown', e => { if (e.key === 'Enter') cerca(); });
 }
 
+// Datalist riepilogo: solo allievi che hanno almeno un'iscrizione
+function populateRiepilogoDatalist() {
+  const dl = $('riepilogoAllieviList');
+  if (!dl) return;
+  const nomi = [...new Set(iscrizioniData.map(r => r.allievo).filter(Boolean))]
+    .sort((a,b) => a.localeCompare(b,'it'));
+  dl.innerHTML = nomi.map(n => `<option value="${escHtml(n)}">`).join('');
+}
+
 // Popola datalist riepilogo quando si entra nella sezione
 async function renderRiepilogoSection() {
-  if (!allieviData.length) await loadAllievi();
-  const dl = $('riepilogoAllieviList');
-  if (dl) dl.innerHTML = allieviData.map(a=>`<option value="${escHtml(a.nomeCompleto)}">`).join('');
+  if (!iscrizioniData.length) await loadIscrizioni();
+  populateRiepilogoDatalist();
 }
 async function apriRiepilogoAllievo(nomeCompleto) {
   if (!iscrizioniData.length) await loadIscrizioni();
   if (!presenzeData.length)   await loadPresenze();
   if (!corsiData.length)       await loadCorsi();
+  if (!allieviData.length)     await loadAllievi();
 
   document.getElementById('riepilogoAllievoTitolo').textContent = nomeCompleto;
   document.getElementById('riepilogoAllievoSub').textContent    = 'Storico iscrizioni, pagamenti e presenze.';
@@ -1899,6 +2462,9 @@ function renderRiepilogoAllievo(nomeCompleto) {
   const importoTot  = iscrizioni.reduce((s, r) => s + (r.costo || 0), 0);
   const importoPag  = iscrizioni.filter(r => isPagato(r.pagato)).reduce((s, r) => s + (r.costo || 0), 0);
 
+  const anagrafica = allieviData.find(a => a.nomeCompleto === nomeCompleto);
+  const tesserato  = anagrafica ? isTesserato(anagrafica.tesseramento) : null;
+
   // Anni e corsi per filtri presenze
   const corsiPresenze = [...new Set(presenze.map(p => p.corso).filter(Boolean))].sort();
   const anniPresenze  = [...new Set(presenze.map(p => p.giorno?.slice(0,4)).filter(Boolean))].sort().reverse();
@@ -1911,6 +2477,7 @@ function renderRiepilogoAllievo(nomeCompleto) {
       <div class="kpi-card"><div class="kpi-label">Totale</div><div class="kpi-value">${fmt(importoTot)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Incassato</div><div class="kpi-value kpi-green">${fmt(importoPag)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Presenze</div><div class="kpi-value">${presenze.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Tesserato</div><div class="kpi-value ${tesserato === null ? '' : tesserato ? 'kpi-green' : 'kpi-red'}">${tesserato === null ? '—' : tesserato ? 'Sì' : 'No'}</div></div>
     </div>
 
     <div class="card" style="margin-bottom:20px;">
@@ -1963,7 +2530,13 @@ function renderRiepilogoAllievo(nomeCompleto) {
     </div>
 
     <div class="card">
-      <div class="card-title">Storico presenze</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div class="card-title" style="margin-bottom:0;">Storico presenze</div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-secondary" id="riepPresCsv" style="padding:4px 10px;font-size:11px;">CSV</button>
+          <button class="btn-secondary" id="riepPresPdf" style="padding:4px 10px;font-size:11px;">PDF</button>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;margin-bottom:12px;">
         <select class="filter-select" id="riepilogoPresCorso" style="width:180px;">
           <option value="">Tutti i corsi</option>
@@ -1981,19 +2554,39 @@ function renderRiepilogoAllievo(nomeCompleto) {
   `;
 
   // Filtri presenze
-  const applyPresFilter = () => {
+  const getFilteredPres = () => {
     const corso = document.getElementById('riepilogoPresCorso')?.value || '';
     const anno  = document.getElementById('riepilogoPresAnno')?.value  || '';
-    const filtered = presenze.filter(p => {
+    return presenze.filter(p => {
       if (corso && p.corso !== corso) return false;
       if (anno  && !p.giorno?.startsWith(anno)) return false;
       return true;
-    });
+    }).sort((a,b) => b.giorno.localeCompare(a.giorno));
+  };
+  const applyPresFilter = () => {
     const tEl = document.getElementById('riepilogoPresTable');
-    if (tEl) tEl.innerHTML = buildPresenzeTable(filtered);
+    if (tEl) tEl.innerHTML = buildPresenzeTable(getFilteredPres());
   };
   document.getElementById('riepilogoPresCorso')?.addEventListener('change', applyPresFilter);
   document.getElementById('riepilogoPresAnno')?.addEventListener('change', applyPresFilter);
+
+  // Export storico presenze
+  document.getElementById('riepPresCsv')?.addEventListener('click', () => {
+    const rows = getFilteredPres();
+    downloadCsv(`presenze_${nomeCompleto.replace(/\s+/g,'_')}.csv`, [
+      'Data;Corso;Note',
+      ...rows.map(p => [fmtDate(p.giorno), `"${(p.corso||'').replace(/"/g,'""')}"`, `"${(p.note||'').replace(/"/g,'""')}"`].join(';'))
+    ]);
+  });
+  document.getElementById('riepPresPdf')?.addEventListener('click', () => {
+    const rows = getFilteredPres();
+    openPrintTable(
+      `Storico presenze — ${nomeCompleto}`,
+      `${rows.length} presenze · generato il ${fmtDate(new Date().toISOString().slice(0,10))}`,
+      ['Data','Corso','Note'],
+      rows.map(p => [fmtDate(p.giorno), p.corso, p.note || '—'])
+    );
+  });
 }
 
 function buildPresenzeTable(presenze) {
@@ -2015,6 +2608,176 @@ function buildPresenzeTable(presenze) {
         </tbody>
       </table>
     </div>`;
+}
+
+// ── REPORT PRESENZE ───────────────────────────────────────
+async function renderReportPresenze() {
+  if (!presenzeData.length) await loadPresenze();
+  if (!corsiData.length)    await loadCorsi();
+  if (!allieviData.length)  await loadAllievi();
+
+  // popola filtro corsi (mantiene la selezione)
+  const selCorso = $('repCorso');
+  const curCorso = selCorso.value;
+  const corsi = [...new Set(presenzeData.map(r => r.corso).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it'));
+  selCorso.innerHTML = '<option value="">Tutti</option>' + corsi.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+  selCorso.value = curCorso;
+
+  // datalist allievi: nomi presenti nelle presenze + anagrafica
+  const nomi = new Set(allieviData.map(a => a.nomeCompleto));
+  presenzeData.forEach(r => r.allievi.forEach(n => nomi.add(n)));
+  $('repAllieviList').innerHTML = [...nomi].sort((a,b)=>a.localeCompare(b,'it'))
+    .map(n => `<option value="${escHtml(n)}">`).join('');
+
+  renderReportPresView();
+}
+
+function getReportPresFiltered() {
+  const corso   = $('repCorso').value;
+  const da      = $('repDa').value;
+  const a       = $('repA').value;
+  const allievo = $('repAllievo').value.trim().toLowerCase();
+  return presenzeData.filter(r => {
+    if (corso && r.corso !== corso) return false;
+    if (da && r.giorno < da) return false;
+    if (a  && r.giorno > a)  return false;
+    if (allievo && !r.allievi.some(n => n.toLowerCase() === allievo)) return false;
+    return true;
+  }).sort((x,y) => y.giorno.localeCompare(x.giorno));
+}
+
+function renderReportPresView() {
+  const el = $('repPresContent');
+  if (!el) return;
+  const rows = getReportPresFiltered();
+  const filtroAllievo = $('repAllievo').value.trim();
+
+  if (!rows.length) {
+    el.innerHTML = '<div class="table-empty">Nessuna presenza per i filtri selezionati.</div>';
+    return;
+  }
+
+  const totPresenze = filtroAllievo ? rows.length : rows.reduce((s,r) => s + r.allievi.length, 0);
+
+  el.innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="kpi-card"><div class="kpi-label">Lezioni</div><div class="kpi-value">${rows.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">${filtroAllievo ? 'Presenze allievo' : 'Presenze totali'}</div><div class="kpi-value">${totPresenze}</div></div>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-title">Andamento presenze per corso</div>
+      <div class="chart-wrap"><canvas id="chartRepPres"></canvas></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="repPresTable">
+        <thead><tr>
+          <th>Data</th><th>Corso</th>
+          <th style="text-align:center">Presenti</th>
+          <th>Allievi</th><th>Note</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td style="white-space:nowrap;">${fmtDate(r.giorno)}</td>
+            <td style="font-weight:500;">${escHtml(r.corso)}</td>
+            <td style="text-align:center;color:var(--text-muted);">${r.allievi.length}</td>
+            <td style="font-size:12px;color:var(--text-muted);">${r.allievi.map(n =>
+              filtroAllievo && n.toLowerCase() === filtroAllievo.toLowerCase()
+                ? `<strong style="color:var(--accent);">${escHtml(n)}</strong>`
+                : escHtml(n)).join(', ')}</td>
+            <td style="font-size:12px;color:var(--text-dim);">${escHtml(r.note || '')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  renderReportPresChart(rows, filtroAllievo);
+}
+
+// Grafico a linee: una linea per corso. Aggrega per mese;
+// se il periodo copre al massimo 2 mesi passa alla granularità giornaliera.
+function renderReportPresChart(rows, filtroAllievo) {
+  const canvas = $('chartRepPres');
+  if (!canvas) return;
+
+  const mesi = [...new Set(rows.map(r => r.giorno.slice(0,7)))].sort();
+  const perGiorno = mesi.length <= 2;
+  const chiavi = perGiorno
+    ? [...new Set(rows.map(r => r.giorno))].sort()
+    : mesi;
+  const keyOf = (r) => perGiorno ? r.giorno : r.giorno.slice(0,7);
+
+  const corsi = [...new Set(rows.map(r => r.corso))].sort((a,b) => a.localeCompare(b,'it'));
+  const colors = donutColors();
+
+  const datasets = corsi.map((corso, i) => {
+    const col = colors[i % colors.length];
+    return {
+      label: corso,
+      data: chiavi.map(k => rows
+        .filter(r => r.corso === corso && keyOf(r) === k)
+        .reduce((s, r) => s + (filtroAllievo ? 1 : r.allievi.length), 0)),
+      borderColor: col,
+      backgroundColor: col,
+      tension: 0.35,
+      pointRadius: 3,
+      borderWidth: 2,
+      fill: false,
+      spanGaps: true,
+    };
+  });
+
+  const labels = chiavi.map(k => {
+    if (perGiorno) return fmtDate(k);
+    const [y, m] = k.split('-');
+    const s = new Date(y, m-1, 1).toLocaleDateString('it-IT', { month:'short', year:'2-digit' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  });
+
+  const base = chartOpts();
+  base.plugins.legend = { labels: { color:'#888', font:{size:11}, boxWidth:10, padding:12 } };
+  base.plugins.tooltip.callbacks = { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} presenze` };
+  base.scales.y.ticks.callback = v => Number.isInteger(v) ? v : '';
+  base.scales.y.beginAtZero = true;
+
+  if (chartRepPres) chartRepPres.destroy();
+  chartRepPres = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: base });
+}
+
+function reportPresPeriodoLabel() {
+  const da = $('repDa').value, a = $('repA').value;
+  const corso = $('repCorso').value || 'tutti i corsi';
+  const allievo = $('repAllievo').value.trim();
+  return [
+    corso,
+    da || a ? `dal ${da ? fmtDate(da) : 'inizio'} al ${a ? fmtDate(a) : 'oggi'}` : 'tutto il periodo',
+    allievo ? `allievo: ${allievo}` : ''
+  ].filter(Boolean).join(' · ');
+}
+
+function exportReportPresCsv() {
+  const rows = getReportPresFiltered();
+  if (!rows.length) return appAlert('Nessuna presenza da esportare.');
+  downloadCsv('report_presenze.csv', [
+    'Data;Corso;Presenti;Allievi;Note',
+    ...rows.map(r => [
+      fmtDate(r.giorno),
+      `"${(r.corso||'').replace(/"/g,'""')}"`,
+      r.allievi.length,
+      `"${r.allievi.join(', ').replace(/"/g,'""')}"`,
+      `"${(r.note||'').replace(/"/g,'""')}"`
+    ].join(';'))
+  ]);
+}
+
+function exportReportPresPdf() {
+  const rows = getReportPresFiltered();
+  if (!rows.length) return appAlert('Nessuna presenza da esportare.');
+  openPrintTable(
+    'Report presenze',
+    `${reportPresPeriodoLabel()} · ${rows.length} lezioni · generato il ${fmtDate(new Date().toISOString().slice(0,10))}`,
+    ['Data','Corso','Presenti','Allievi','Note'],
+    rows.map(r => [fmtDate(r.giorno), r.corso, r.allievi.length, r.allievi.join(', '), r.note || '—'])
+  );
 }
 
 // ── CHART CONFIG ──────────────────────────────────────────
@@ -2055,6 +2818,42 @@ function donutColors() {
 // ── UTILITY ──────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Scarica righe già formattate come file CSV (BOM per Excel)
+function downloadCsv(filename, lines) {
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Apre una finestra di stampa (→ PDF) con una tabella semplice
+function openPrintTable(titolo, sottotitolo, headers, rows) {
+  const w = window.open('', '_blank');
+  if (!w) { appAlert('Popup bloccato dal browser: consenti i popup per scaricare il PDF.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>${escHtml(titolo)}</title><style>
+    body { font-family: 'DM Sans', system-ui, sans-serif; color: #111; padding: 28px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p  { font-size: 12px; color: #555; margin: 0 0 18px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #ccc; padding: 6px 9px; text-align: left; vertical-align: top; }
+    th { background: #f2f2f2; font-weight: 600; }
+    tr { page-break-inside: avoid; }
+  </style></head><body>
+    <h1>${escHtml(titolo)}</h1>
+    <p>${escHtml(sottotitolo)}</p>
+    <table>
+      <thead><tr>${headers.map(h=>`<th>${escHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${escHtml(String(c))}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+  </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
 }
 
 // ── TEMA ─────────────────────────────────────────────────
@@ -2355,6 +3154,8 @@ function renderNotaMensile() {
 
 // ── INIT ──────────────────────────────────────────────────
 async function init() {
+  initDialog();
+  initMobileTables();
   await requireAuth();
 
   const savedTheme = localStorage.getItem('danza_theme') || 'dark';
@@ -2367,12 +3168,17 @@ async function init() {
   $('hamburger').addEventListener('click', () => {
     const sb = $('sidebar');
     const main = document.querySelector('.main');
-    if (window.innerWidth <= 768) {
-      sb.classList.toggle('open');
+    if (window.innerWidth <= 1024) {
+      const open = sb.classList.toggle('open');
+      $('sidebarOverlay')?.classList.toggle('show', open);
     } else {
       sb.classList.toggle('hidden');
       main.classList.toggle('full');
     }
+  });
+  $('sidebarOverlay')?.addEventListener('click', () => {
+    $('sidebar').classList.remove('open');
+    $('sidebarOverlay').classList.remove('show');
   });
 
   $('btnLogout').addEventListener('click', async () => {
@@ -2381,7 +3187,7 @@ async function init() {
     window.location.replace('login.html');
   });
 
-  document.querySelectorAll('.nav-item[data-section]').forEach(item => {
+  document.querySelectorAll('.nav-item[data-section], .bnav-item[data-section]').forEach(item => {
     item.addEventListener('click', () => showSection(item.dataset.section));
   });
 
@@ -2405,6 +3211,24 @@ async function init() {
       $('aTipo').value = chip.dataset.tipo;
     });
   });
+
+  // Azioni rapide dashboard
+  $('btnDashPresenza').addEventListener('click', async () => {
+    if (!corsiData.length)       await loadCorsi();
+    if (!allieviData.length)     await loadAllievi();
+    if (!iscrizioniData.length)  await loadIscrizioni();
+    if (!presenzeData.length)    await loadPresenze();
+    populateAllieviDatalist();
+    openNuovaPresenza();
+  });
+  $('btnDashAllievo').addEventListener('click', openNewAllievo);
+
+  // Modal corso
+  $('btnNuovoCorso').addEventListener('click', openNewCorso);
+  $('modalCorsoClose').addEventListener('click', closeCorsoModal);
+  $('modalCorsoCancel').addEventListener('click', closeCorsoModal);
+  $('modalCorsoSave').addEventListener('click', saveCorso);
+  $('modalCorsoOverlay').addEventListener('click', e => { if (e.target === $('modalCorsoOverlay')) closeCorsoModal(); });
 
   // Presenze
   $('btnNuovaPresenza').addEventListener('click', async () => {
@@ -2449,6 +3273,7 @@ async function init() {
   // Filtri allievi live
   $('searchAllievi').addEventListener('input', applyAllieviFilters);
   $('filterTipoAllievo').addEventListener('change', applyAllieviFilters);
+  $('filterTesseramento').addEventListener('change', applyAllieviFilters);
 
   // Filtri iscrizioni live
   $('searchIscrizioni').addEventListener('input', applyIscrizioniFilters);
@@ -2487,8 +3312,19 @@ async function init() {
   $('notaAnno').addEventListener('change', renderNotaMensile);
   $('notaMese').addEventListener('change', renderNotaMensile);
 
+  // Report presenze
+  ['repCorso','repDa','repA'].forEach(id => $(id).addEventListener('change', renderReportPresView));
+  $('repAllievo').addEventListener('input', renderReportPresView);
+  $('btnRepClear').addEventListener('click', () => {
+    ['repCorso','repDa','repA','repAllievo'].forEach(id => { $(id).value = ''; });
+    renderReportPresView();
+  });
+  $('btnRepCsv').addEventListener('click', exportReportPresCsv);
+  $('btnRepPdf').addEventListener('click', exportReportPresPdf);
+
   initElencoFilters();
   initInserimento();
+  initCsvImport();
   initRiepilogoAllievo();
 
   showSection('dashboard');
@@ -2498,7 +3334,7 @@ async function init() {
     await Promise.all([loadSpese(), loadAllievi(), loadCorsi(), loadIscrizioni(), loadPresenze()]);
   } catch (e) {
     if (e.code === 'permission-denied') {
-      alert('Account non autorizzato.');
+      await appAlert('Account non autorizzato.');
       sessionStorage.removeItem('danza_auth');
       await signOut(auth);
       window.location.replace('login.html');
@@ -2515,6 +3351,7 @@ async function init() {
 Object.assign(window, {
   openEdit, deleteRow,
   openEditAllievo, deleteAllievo,
+  openEditCorso, deleteCorso,
   openEditIscrizione, deleteIscrizione,
   openEditPresenza, deletePresenza, openPresForDay,
   apriRiepilogoAllievo,
