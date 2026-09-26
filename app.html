@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard — Scuola di Danza</title>
+<title>Gestion</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=24">
 <style>
   .table-wrap { overflow-x: auto; }
   .data-table thead th {
@@ -130,6 +130,15 @@
         <line x1="16" y1="5" x2="16" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
       </svg>
       Corsi
+    </div>
+    <div class="nav-item" data-section="personale">
+      <svg class="nav-icon" viewBox="0 0 18 18" fill="none">
+        <circle cx="6.5" cy="6" r="2.5" stroke="currentColor" stroke-width="1.4"/>
+        <circle cx="12.5" cy="7" r="2" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M2 15c0-2.76 2.02-4.5 4.5-4.5S11 12.24 11 15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <path d="M11.5 10.7c2 .1 3.5 1.6 3.5 4.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      Personale
     </div>
     <div class="nav-item" data-section="iscrizioni">
       <svg class="nav-icon" viewBox="0 0 18 18" fill="none">
@@ -307,8 +316,14 @@
             <div id="dashDaSaldare" style="margin-top:10px;"></div>
           </div>
           <div class="card">
-            <div class="card-title">Prossime lezioni <span style="font-size:10px;color:var(--text-dim);font-weight:400;">(stimate dalle presenze registrate)</span></div>
+            <div class="card-title">Prossime lezioni <span style="font-size:10px;color:var(--text-dim);font-weight:400;">(prossimi 7 giorni)</span></div>
             <div id="dashProssime" style="margin-top:10px;"></div>
+          </div>
+        </div>
+        <div class="dash-grid" style="margin-top:16px;">
+          <div class="card" style="grid-column:1 / -1;">
+            <div class="card-title">Pacchetti in scadenza e lezioni in esaurimento <span style="font-size:10px;color:var(--text-dim);font-weight:400;">(entro 15 giorni, o ultima lezione del pacchetto)</span></div>
+            <div id="dashScadenze" style="margin-top:10px;"></div>
           </div>
         </div>
         <div class="dash-grid" style="margin-top:16px;">
@@ -366,6 +381,15 @@
         <div class="form-group" id="tessAllievoGroup" style="display:none;">
           <label class="form-label">Allievo da tesserare <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(il suo tesseramento diventa "Sì")</span></label>
           <select class="form-input" id="fTessAllievo"><option value="">— seleziona allievo —</option></select>
+          <div style="margin-top:10px;">
+            <label class="form-label">Valido fino al</label>
+            <input type="date" class="form-input" id="fTessScad">
+          </div>
+        </div>
+        <!-- Personale (solo categoria Contributo team) -->
+        <div class="form-group" id="fPersonaleGroup" style="display:none;">
+          <label class="form-label">Personale</label>
+          <select class="form-input" id="fPersonale"><option value="">— seleziona —</option></select>
         </div>
         <div class="divider"></div>
         <!-- Pagamento -->
@@ -391,31 +415,79 @@
       <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
         <div>
           <h1 class="section-title">Corsi</h1>
-          <p class="section-subtitle">Corsi attivi con prezzi di lezioni e pacchetti.</p>
+          <p class="section-subtitle">Corsi e abbonamenti della scuola.</p>
         </div>
-        <button class="btn-primary" id="btnNuovoCorso">
+        <div style="display:flex;gap:8px;">
+          <button class="btn-primary" id="btnNuovoCorso">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Nuovo corso
+          </button>
+          <button class="btn-primary" id="btnNuovoAbbonamento" style="display:none;">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Nuovo abbonamento
+          </button>
+        </div>
+      </div>
+
+      <!-- Sotto-schede: Corsi / Abbonamenti -->
+      <div class="pres-view-switch" id="corsiSubTabSwitch" style="margin-bottom:16px;width:fit-content;">
+        <button type="button" class="pres-view-btn active" data-subtab="corsi">Corsi</button>
+        <button type="button" class="pres-view-btn" data-subtab="abbonamenti">Abbonamenti</button>
+      </div>
+
+      <!-- SOTTO-SCHEDA CORSI -->
+      <div id="corsiSubCorsi">
+        <div class="pres-view-switch" id="corsiRaggruppaSwitch" style="margin-bottom:16px;width:fit-content;">
+          <button type="button" class="pres-view-btn active" data-raggruppa="">Tutti i corsi</button>
+          <button type="button" class="pres-view-btn" data-raggruppa="durata">Per durata</button>
+          <button type="button" class="pres-view-btn" data-raggruppa="abbonamento">Per abbonamento</button>
+        </div>
+        <input type="hidden" id="corsiRaggruppa" value="">
+        <div id="corsiLoading" class="table-loading" style="display:none;"></div>
+        <div id="corsiTableWrap" style="display:none;"></div>
+        <div class="table-empty" id="corsiEmpty" style="display:none;">Nessun corso. Creane uno con "Nuovo corso".</div>
+      </div>
+
+      <!-- SOTTO-SCHEDA ABBONAMENTI -->
+      <div id="corsiSubAbbonamenti" style="display:none;">
+        <div class="pres-view-switch" id="abbonamentiRaggruppaSwitch" style="margin-bottom:16px;width:fit-content;">
+          <button type="button" class="pres-view-btn active" data-raggruppa="">Tutti gli abbonamenti</button>
+          <button type="button" class="pres-view-btn" data-raggruppa="tipoErogazione">Per erogazione</button>
+          <button type="button" class="pres-view-btn" data-raggruppa="contenuto">Per contenuto</button>
+        </div>
+        <input type="hidden" id="abbonamentiRaggruppa" value="">
+        <div id="abbonamentiLoading" class="table-loading" style="display:none;"></div>
+        <div id="abbonamentiTableWrap" style="display:none;"></div>
+        <div class="table-empty" id="abbonamentiEmpty" style="display:none;">Nessun abbonamento. Creane uno con "Nuovo abbonamento".</div>
+      </div>
+    </section>
+
+    <!-- ── PERSONALE ── -->
+    <section class="section" id="sec-personale">
+      <div class="section-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h1 class="section-title">Personale</h1>
+          <p class="section-subtitle">Personale della scuola.</p>
+        </div>
+        <button class="btn-primary" id="btnNuovoPersonale">
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          Nuovo corso
+          Nuovo membro
         </button>
       </div>
-      <div id="corsiLoading" class="table-loading" style="display:none;"></div>
-      <div class="table-wrap" id="corsiTableWrap" style="display:none;">
-        <table class="data-table" id="corsiTable">
+      <div id="personaleLoading" class="table-loading" style="display:none;"></div>
+      <div class="table-wrap" id="personaleTableWrap" style="display:none;">
+        <table class="data-table" id="personaleTable">
           <thead>
             <tr>
+              <th>Cognome</th>
               <th>Nome</th>
-              <th>Durata</th>
-              <th style="text-align:right">Lezione singola</th>
-              <th style="text-align:right">x4</th>
-              <th style="text-align:right">x8</th>
-              <th style="text-align:right">x12</th>
               <th style="width:70px"></th>
             </tr>
           </thead>
-          <tbody id="corsiBody"></tbody>
+          <tbody id="personaleBody"></tbody>
         </table>
       </div>
-      <div class="table-empty" id="corsiEmpty" style="display:none;">Nessun corso. Creane uno con "Nuovo corso".</div>
+      <div class="table-empty" id="personaleEmpty" style="display:none;">Nessun membro del personale. Creane uno con "Nuovo membro".</div>
     </section>
 
     <!-- ── REPORT PRESENZE ── -->
@@ -523,10 +595,10 @@
           <svg class="spin" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="var(--border)" stroke-width="2"/><path d="M9 2a7 7 0 0 1 7 7" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
           Caricamento…
         </div>
-        <table class="data-table" id="speseTable" style="display:none;">
+        <table class="data-table" id="speseTable" data-mobile-cols="speseTable" style="display:none;">
           <thead>
             <tr>
-              <th class="sortable" data-col="0">Data</th>
+              <th>Data</th>
               <th>Descrizione</th>
               <th>Categoria</th>
               <th>Tipo</th>
@@ -651,33 +723,50 @@
           <h1 class="section-title">Allievi</h1>
           <p class="section-subtitle">Registro degli allievi della scuola.</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-          <input type="text" class="filter-select" id="searchAllievi" placeholder="Cerca nome…" style="width:180px;">
+        <button class="btn-primary" id="btnNuovoAllievo">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Nuovo allievo
+        </button>
+      </div>
+      <!-- Filtri -->
+      <div class="filters-bar">
+        <div class="filter-group">
+          <label class="form-label">Cerca</label>
+          <input type="text" class="filter-select" id="searchAllievi" placeholder="Nome o mail…">
+        </div>
+        <div class="filter-group">
+          <label class="form-label">Tipo</label>
           <select class="filter-select" id="filterTipoAllievo"><option value="">Tutti i tipi</option></select>
+        </div>
+        <div class="filter-group">
+          <label class="form-label">Tesseramento</label>
           <select class="filter-select" id="filterTesseramento">
-            <option value="">Tesseramento</option>
+            <option value="">Tutti</option>
             <option value="si">Sì</option>
             <option value="no">No</option>
           </select>
-          <button class="btn-primary" id="btnNuovoAllievo">
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-            Nuovo allievo
-          </button>
         </div>
+        <button class="btn-secondary" id="btnClearAllieviFiltri">Azzera</button>
       </div>
+      <div class="pres-view-switch" id="allieviRaggruppaSwitch" style="margin-bottom:16px;width:fit-content;">
+        <button type="button" class="pres-view-btn active" data-raggruppa="">Nessun raggruppamento</button>
+        <button type="button" class="pres-view-btn" data-raggruppa="tipo">Per tipo</button>
+        <button type="button" class="pres-view-btn" data-raggruppa="tesseramento">Per tesseramento</button>
+      </div>
+      <input type="hidden" id="allieviRaggruppa" value="">
       <div class="table-loading" id="allieviLoading">
         <svg class="spin" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="var(--border)" stroke-width="2"/><path d="M9 2a7 7 0 0 1 7 7" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
         Caricamento…
       </div>
-      <div class="table-wrap" style="display:none;" id="allieviTableWrap">
-        <table class="data-table" id="allieviTable">
+      <div style="display:none;" id="allieviTableWrap">
+        <table class="data-table" id="allieviTable" data-mobile-cols="allieviTable">
           <thead>
             <tr>
-              <th class="sortable" data-acol="nomeCompleto">Nome completo <span class="sort-arrow">↕</span></th>
-              <th class="sortable" data-acol="tipo">Tipo <span class="sort-arrow">↕</span></th>
-              <th class="sortable" data-acol="tesseramento">Tesseramento <span class="sort-arrow">↕</span></th>
-              <th class="sortable" data-acol="cellulare">Cellulare <span class="sort-arrow">↕</span></th>
-              <th class="sortable" data-acol="mail">Mail <span class="sort-arrow">↕</span></th>
+              <th>Nome completo</th>
+              <th>Tipo</th>
+              <th>Tesseramento</th>
+              <th>Cellulare</th>
+              <th>Mail</th>
               <th>Note</th>
               <th style="width:72px"></th>
             </tr>
@@ -704,7 +793,7 @@
       <div class="filters-bar" style="margin-bottom:16px;">
         <div class="filter-group">
           <label class="form-label">Cerca</label>
-          <input type="text" class="filter-select" id="searchIscrizioni" placeholder="Allievo o corso…" style="width:180px;">
+          <input type="text" class="filter-select" id="searchIscrizioni" placeholder="Allievo o corso…">
         </div>
         <div class="filter-group">
           <label class="form-label">A.S.</label>
@@ -720,6 +809,13 @@
         </div>
         <button class="btn-secondary" id="btnClearIscFiltri" style="align-self:flex-end">Azzera</button>
       </div>
+      <div class="pres-view-switch" id="iscrizioniRaggruppaSwitch" style="margin-bottom:16px;width:fit-content;">
+        <button type="button" class="pres-view-btn active" data-raggruppa="">Nessun raggruppamento</button>
+        <button type="button" class="pres-view-btn" data-raggruppa="tipo">Per tipo</button>
+        <button type="button" class="pres-view-btn" data-raggruppa="corso">Per corso</button>
+        <button type="button" class="pres-view-btn" data-raggruppa="tesseramento">Per tesseramento</button>
+      </div>
+      <input type="hidden" id="iscrizioniRaggruppa" value="">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <span class="count-label" id="iscrizioniCount">— iscrizioni</span>
         <span class="totals-label" id="iscrizioniTotale"></span>
@@ -728,8 +824,8 @@
         <svg class="spin" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="var(--border)" stroke-width="2"/><path d="M9 2a7 7 0 0 1 7 7" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
         Caricamento…
       </div>
-      <div class="table-wrap" style="display:none;" id="iscrizioniTableWrap">
-        <table class="data-table" id="iscrizioniTable">
+      <div style="display:none;" id="iscrizioniTableWrap">
+        <table class="data-table" id="iscrizioniTable" data-mobile-cols="iscrizioniTable">
           <thead>
             <tr>
               <th>Allievo</th>
@@ -757,15 +853,25 @@
           <h1 class="section-title">Presenze</h1>
           <p class="section-subtitle">Registro delle presenze ai corsi.</p>
         </div>
-        <button class="btn-primary" id="btnNuovaPresenza">
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          Registra presenza
-        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-secondary" id="btnEsportaCalendario">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 2v7M4 6l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            Esporta calendario
+          </button>
+          <button class="btn-secondary" id="btnImportaCalendario">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 9V2M4 5l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 10v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            Importa calendario
+          </button>
+          <button class="btn-primary" id="btnNuovaPresenza">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            Registra presenza
+          </button>
+        </div>
       </div>
 
       <!-- View switcher + filtri -->
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-        <div class="pres-view-switch">
+        <div class="pres-view-switch" id="presViewSwitch">
           <button class="pres-view-btn active" data-view="calendario">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/><line x1="1" y1="5.5" x2="13" y2="5.5" stroke="currentColor" stroke-width="1.1"/><line x1="4.5" y1="0.5" x2="4.5" y2="3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="9.5" y1="0.5" x2="9.5" y2="3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
             Calendario
@@ -773,6 +879,10 @@
           <button class="pres-view-btn" data-view="elenco">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><line x1="2" y1="4" x2="12" y2="4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="10" x2="8" y2="10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
             Elenco
+          </button>
+          <button class="pres-view-btn" data-view="tabella">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/><line x1="1" y1="5.5" x2="13" y2="5.5" stroke="currentColor" stroke-width="1.1"/><line x1="5.5" y1="5.5" x2="5.5" y2="12" stroke="currentColor" stroke-width="1.1"/><line x1="9.5" y1="5.5" x2="9.5" y2="12" stroke="currentColor" stroke-width="1.1"/></svg>
+            Tabella
           </button>
           <button class="pres-view-btn" data-view="corso">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="4" r="2.5" stroke="currentColor" stroke-width="1.3"/><path d="M2 12c0-2.761 2.239-4 5-4s5 1.239 5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
@@ -783,9 +893,25 @@
             Per allievo
           </button>
         </div>
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select class="filter-select" id="presFiltroCorso" style="width:160px;"><option value="">Tutti i corsi</option></select>
-          <input type="month" class="filter-select" id="presFiltroMese" style="width:140px;">
+      </div>
+      <!-- Filtri: "Mese" per il Calendario (naviga con le frecce), "Da/A" per
+           le altre viste (elenco, tabella, per corso, per allievo) -->
+      <div class="filters-bar">
+        <div class="filter-group">
+          <label class="form-label">Corso</label>
+          <select class="filter-select" id="presFiltroCorso"><option value="">Tutti i corsi</option></select>
+        </div>
+        <div class="filter-group" id="presFiltroMeseGroup">
+          <label class="form-label">Mese</label>
+          <input type="month" class="filter-select" id="presFiltroMese">
+        </div>
+        <div class="filter-group" id="presFiltroRangeGroup" style="display:none;">
+          <label class="form-label">Da</label>
+          <input type="date" class="filter-select" id="presFiltroDa">
+        </div>
+        <div class="filter-group" id="presFiltroRangeGroupA" style="display:none;">
+          <label class="form-label">A</label>
+          <input type="date" class="filter-select" id="presFiltroA">
         </div>
       </div>
 
@@ -800,6 +926,10 @@
           <h1 class="section-title" id="riepilogoAllievoTitolo">Riepilogo allievo</h1>
           <p class="section-subtitle" id="riepilogoAllievoSub">Seleziona un allievo per vedere il riepilogo.</p>
         </div>
+        <button class="btn-secondary" id="btnRiepilogoModifica" style="display:none;">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M8.5 1.5l2 2L4 10H2v-2L8.5 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          Modifica allievo
+        </button>
       </div>
       <!-- Search allievo -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
@@ -892,6 +1022,11 @@
           </select>
         </div>
       </div>
+      <!-- Personale (solo categoria Contributo team) -->
+      <div class="form-group" id="mPersonaleGroup" style="display:none;">
+        <label class="form-label">Personale</label>
+        <select class="form-input" id="mPersonale"><option value="">— seleziona —</option></select>
+      </div>
       <div class="form-group">
         <label class="form-label">Pagamento</label>
         <select class="form-input" id="mPagamento">
@@ -937,13 +1072,19 @@
           </div>
           <input type="hidden" id="aTipo">
         </div>
-      <div class="form-group">
+      <div class="form-row">
+        <div class="form-group">
           <label class="form-label">Tesseramento</label>
           <select class="form-input" id="aTesseramento">
             <option value="No">No</option>
             <option value="Sì">Sì</option>
           </select>
         </div>
+        <div class="form-group" id="aTesseramentoScadGroup" style="display:none;">
+          <label class="form-label">Valido fino al</label>
+          <input type="date" class="form-input" id="aTesseramentoScad">
+        </div>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Cellulare</label>
@@ -995,11 +1136,34 @@
           <input type="date" class="form-input" id="iData">
         </div>
       </div>
-      <!-- Tipo chip -->
+      <!-- Abbonamento (determina tipo di erogazione e prezzi) -->
       <div class="form-group">
+        <label class="form-label">Abbonamento</label>
+        <select class="form-input" id="iAbbonamento">
+          <option value="">— seleziona abbonamento —</option>
+        </select>
+      </div>
+      <!-- Corso frequentato: il menu mostra solo i corsi che accettano
+           l'abbonamento selezionato (un corso senza restrizioni li accetta
+           tutti). Con un abbonamento "mix" non si sceglie qui: vale su
+           qualsiasi corso, e l'allievo comparirà nell'elenco presenze di
+           ognuno. -->
+      <div class="form-group" id="iCorsoGroup">
+        <label class="form-label">Corso</label>
+        <select class="form-input" id="iCorso">
+          <option value="">— seleziona corso —</option>
+        </select>
+      </div>
+      <div class="form-group" id="iCorsoMixInfo" style="display:none;">
+        <label class="form-label">Corso</label>
+        <div style="font-size:13px;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 13px;">
+          Abbonamento valido su qualsiasi corso — l'allievo comparirà nell'elenco presenze di ognuno.
+        </div>
+      </div>
+      <!-- Tipo chip (abbonamenti a pacchetti) -->
+      <div class="form-group" id="iTipoPacchettiGroup">
         <label class="form-label">Tipo</label>
         <div class="cat-grid" id="iTipoGrid">
-          <button type="button" class="cat-chip" data-tipo="Prova">Prova</button>
           <button type="button" class="cat-chip" data-tipo="x1">x1</button>
           <button type="button" class="cat-chip" data-tipo="x4">x4</button>
           <button type="button" class="cat-chip" data-tipo="x8">x8</button>
@@ -1007,34 +1171,53 @@
         </div>
         <input type="hidden" id="iTipo">
       </div>
-      <!-- Corso -->
-      <div class="form-group">
-        <label class="form-label">Corso</label>
-        <select class="form-input" id="iCorso">
-          <option value="">— seleziona corso —</option>
-        </select>
-      </div>
-      <!-- Costo (auto) -->
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Costo (€) <span style="color:var(--text-dim);font-size:10px;font-weight:400;">(auto da corso + tipo)</span></label>
-          <div class="input-prefix-wrap">
-            <span class="input-prefix">€</span>
-            <input type="number" class="form-input with-prefix" id="iCosto" min="0" step="0.01" placeholder="0.00">
-          </div>
+      <!-- Info abbonamento a scadenza: un solo tipo possibile, deciso dall'abbonamento -->
+      <div class="form-group" id="iTipoScadenzaInfo" style="display:none;">
+        <label class="form-label">Abbonamento</label>
+        <div style="font-size:13px;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 13px;">
+          <span id="iTipoScadenzaLabel">—</span>
         </div>
+      </div>
+      <!-- Info abbonamento "Prova": lezione di prova gratuita, tipo fisso -->
+      <div class="form-group" id="iTipoProvaInfo" style="display:none;">
+        <label class="form-label">Abbonamento</label>
+        <div style="font-size:13px;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 13px;">
+          Lezione di prova gratuita — un solo utilizzo per allievo.
+        </div>
+      </div>
+      <!-- Costo (auto, non si applica alla Prova: gratuita) -->
+      <div class="form-group" id="iCostoGroup">
+        <label class="form-label">Costo (€) <span style="color:var(--text-dim);font-size:10px;font-weight:400;">(auto da abbonamento + tipo)</span></label>
+        <div class="input-prefix-wrap">
+          <span class="input-prefix">€</span>
+          <input type="number" class="form-input with-prefix" id="iCosto" min="0" step="0.01" placeholder="0.00">
+        </div>
+      </div>
+      <!-- Pagato + data pagamento (non si applica alla Prova) -->
+      <div class="form-row" id="iPagatoRow">
         <div class="form-group">
+          <label class="form-label">Pagato</label>
+          <div class="cat-grid" id="iPagatoGrid">
+            <button type="button" class="cat-chip" data-pagato="No">No</button>
+            <button type="button" class="cat-chip" data-pagato="Sì">Sì</button>
+          </div>
+          <input type="hidden" id="iPagato" value="No">
+        </div>
+        <div class="form-group" id="iDataPagGroup" style="display:none;">
           <label class="form-label">Data pagamento</label>
           <input type="date" class="form-input" id="iDataPag">
         </div>
       </div>
-      <!-- Pagato checkbox -->
-      <div class="form-group" style="flex-direction:row;align-items:center;gap:10px;">
-        <label class="form-label" style="margin:0;">Pagato</label>
-        <label class="checkbox-wrap" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <input type="checkbox" id="iPagato" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer;">
-          <span style="font-size:13px;color:var(--text-muted)">Sì, già pagato</span>
+      <!-- Tesseramento (opzionale: aggiorna il tesseramento dell'allievo) -->
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px;">
+          <input type="checkbox" id="iTesseraAllievo" style="width:auto;">
+          Aggiorna tesseramento allievo <span style="color:var(--text-dim);font-size:10px;font-weight:400;">(diventa "Sì")</span>
         </label>
+        <div class="form-group" id="iTesseramentoScadGroup" style="display:none;margin-top:8px;">
+          <label class="form-label">Valido fino al</label>
+          <input type="date" class="form-input" id="iTesseramentoScad">
+        </div>
       </div>
       <!-- Note -->
       <div class="form-group">
@@ -1046,6 +1229,40 @@
       <button class="btn-secondary" id="modalIscCancel">Annulla</button>
       <button class="btn-primary" id="modalIscSave">Salva</button>
     </div>
+  </div>
+</div>
+
+<!-- MODAL IMPORT CALENDARIO LEZIONI -->
+<div class="modal-overlay" id="modalCalImpOverlay" style="display:none;">
+  <div class="modal" style="width:640px;max-width:95vw;">
+    <div class="modal-header">
+      <span class="modal-title">Importa calendario lezioni</span>
+      <button class="modal-close" id="calImpClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px;">
+        Colonne: <strong>Giorno; Ora; Corso</strong>.
+        Date <code>GG/MM/AAAA</code> o <code>AAAA-MM-GG</code>, ora <code>HH:MM</code> (opzionale), il corso deve esistere nella scheda Corsi.
+        Le lezioni importate compaiono nel calendario senza presenze: le spunti a lezione fatta.
+      </p>
+      <div class="form-actions" style="justify-content:flex-start;margin:0;">
+        <button class="btn-secondary" id="btnCalTemplate">Scarica modello</button>
+        <input type="file" id="calImpFile" accept=".csv,text/csv" style="display:none;">
+        <button class="btn-primary" id="btnCalPick">Scegli file CSV…</button>
+      </div>
+      <div id="calImpPreview" style="margin-top:14px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SCELTA LEZIONE (calendario presenze) -->
+<div class="modal-overlay" id="modalPresDayOverlay" style="display:none;">
+  <div class="modal" style="width:380px;">
+    <div class="modal-header">
+      <span class="modal-title" id="presDayTitle">Lezioni del giorno</span>
+      <button class="modal-close" id="presDayClose">✕</button>
+    </div>
+    <div class="modal-body" id="presDayList" style="gap:8px;"></div>
   </div>
 </div>
 
@@ -1080,42 +1297,162 @@
           <input type="text" class="form-input" id="cDurata" placeholder="60 min">
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Lezione singola (€)</label>
-          <div class="input-prefix-wrap">
-            <span class="input-prefix">€</span>
-            <input type="number" class="form-input with-prefix" id="cX1" min="0" step="0.01" placeholder="0.00">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Pacchetto x4 (€)</label>
-          <div class="input-prefix-wrap">
-            <span class="input-prefix">€</span>
-            <input type="number" class="form-input with-prefix" id="cX4" min="0" step="0.01" placeholder="0.00">
-          </div>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Pacchetto x8 (€)</label>
-          <div class="input-prefix-wrap">
-            <span class="input-prefix">€</span>
-            <input type="number" class="form-input with-prefix" id="cX8" min="0" step="0.01" placeholder="0.00">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Pacchetto x12 (€)</label>
-          <div class="input-prefix-wrap">
-            <span class="input-prefix">€</span>
-            <input type="number" class="form-input with-prefix" id="cX12" min="0" step="0.01" placeholder="0.00">
-          </div>
-        </div>
+      <div class="form-group">
+        <label class="form-label">Tipo di abbonamento <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(nessuna selezione = valido per tutti)</span></label>
+        <div class="cat-grid" id="cAbbonamentiGrid"></div>
+        <input type="hidden" id="cAbbonamenti" value="">
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" id="modalCorsoCancel">Annulla</button>
       <button class="btn-primary" id="modalCorsoSave">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ABBONAMENTO (nuovo / modifica) -->
+<div class="modal-overlay" id="modalAbbonamentoOverlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalAbbonamentoTitle">Nuovo abbonamento</span>
+      <button class="modal-close" id="modalAbbonamentoClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Nome</label>
+        <input type="text" class="form-input" id="abNome" placeholder="Abbonamento Pilates">
+      </div>
+
+      <!-- Contenuto: riguarda solo il conteggio delle lezioni consumate — il
+           corso si sceglie sempre in iscrizione, non qui -->
+      <div class="form-group">
+        <label class="form-label">Contenuto <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(il corso si sceglie in iscrizione)</span></label>
+        <div class="cat-grid" id="abContenutoGrid">
+          <button type="button" class="cat-chip active" data-contenuto="singolo">Singolo corso</button>
+          <button type="button" class="cat-chip" data-contenuto="mix">Mix</button>
+        </div>
+        <input type="hidden" id="abContenuto" value="singolo">
+        <p style="font-size:11px;color:var(--text-dim);margin-top:6px;">
+          "Singolo corso": le lezioni si contano solo sul corso scelto in iscrizione.
+          "Mix": le lezioni si contano su qualsiasi corso l'allievo frequenti.
+        </p>
+      </div>
+
+      <!-- Tipo di erogazione -->
+      <div class="form-group">
+        <label class="form-label">Tipo di erogazione</label>
+        <div class="cat-grid" id="abTipoErogazioneGrid">
+          <button type="button" class="cat-chip active" data-erogazione="pacchetti">A pacchetti</button>
+          <button type="button" class="cat-chip" data-erogazione="scadenza">A scadenza</button>
+        </div>
+        <input type="hidden" id="abTipoErogazione" value="pacchetti">
+      </div>
+
+      <!-- A PACCHETTI -->
+      <div id="abPacchettiGroup">
+        <div class="form-group">
+          <label class="form-label">Lezione singola (€)</label>
+          <div class="input-prefix-wrap">
+            <span class="input-prefix">€</span>
+            <input type="number" class="form-input with-prefix" id="abX1" min="0" step="0.01" placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Pacchetto x4 (€)</label>
+            <div class="input-prefix-wrap">
+              <span class="input-prefix">€</span>
+              <input type="number" class="form-input with-prefix" id="abX4" min="0" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Scadenza x4 <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(giorni da acquisto)</span></label>
+            <input type="number" class="form-input" id="abX4Scad" min="0" step="1" placeholder="es. 60">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Pacchetto x8 (€)</label>
+            <div class="input-prefix-wrap">
+              <span class="input-prefix">€</span>
+              <input type="number" class="form-input with-prefix" id="abX8" min="0" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Scadenza x8 <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(giorni da acquisto)</span></label>
+            <input type="number" class="form-input" id="abX8Scad" min="0" step="1" placeholder="es. 90">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Pacchetto x12 (€)</label>
+            <div class="input-prefix-wrap">
+              <span class="input-prefix">€</span>
+              <input type="number" class="form-input with-prefix" id="abX12" min="0" step="0.01" placeholder="0.00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Scadenza x12 <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(giorni da acquisto)</span></label>
+            <input type="number" class="form-input" id="abX12Scad" min="0" step="1" placeholder="es. 120">
+          </div>
+        </div>
+      </div>
+
+      <!-- A SCADENZA -->
+      <div id="abScadenzaGroup" style="display:none;">
+        <div class="form-group">
+          <label class="form-label">Costo abbonamento (€)</label>
+          <div class="input-prefix-wrap">
+            <span class="input-prefix">€</span>
+            <input type="number" class="form-input with-prefix" id="abCostoAbb" min="0" step="0.01" placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Durata</label>
+          <div class="cat-grid" id="abScadTipoGrid">
+            <button type="button" class="cat-chip" data-scadtipo="Mensile">Mensile</button>
+            <button type="button" class="cat-chip" data-scadtipo="Bimestrale">Bimestrale</button>
+            <button type="button" class="cat-chip" data-scadtipo="Semestrale">Semestrale</button>
+            <button type="button" class="cat-chip" data-scadtipo="Annuale">Annuale</button>
+            <button type="button" class="cat-chip" data-scadtipo="Personalizzata">Data personalizzata</button>
+          </div>
+          <input type="hidden" id="abScadTipo" value="">
+        </div>
+        <div class="form-group" id="abScadDataGroup" style="display:none;">
+          <label class="form-label">Data di scadenza <span style="color:var(--text-dim);font-size:10px;font-weight:400;text-transform:none;">(uguale per tutti gli iscritti)</span></label>
+          <input type="date" class="form-input" id="abScadData">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modalAbbonamentoCancel">Annulla</button>
+      <button class="btn-primary" id="modalAbbonamentoSave">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PERSONALE (nuovo / modifica) -->
+<div class="modal-overlay" id="modalPersonaleOverlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalPersonaleTitle">Nuovo membro del personale</span>
+      <button class="modal-close" id="modalPersonaleClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Cognome</label>
+          <input type="text" class="form-input" id="pCognome" placeholder="Rossi">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nome</label>
+          <input type="text" class="form-input" id="pNome" placeholder="Giulia">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modalPersonaleCancel">Annulla</button>
+      <button class="btn-primary" id="modalPersonaleSave">Salva</button>
     </div>
   </div>
 </div>
@@ -1170,8 +1507,12 @@
       <!-- Aggiungi allievo extra -->
       <div class="form-group">
         <label class="form-label">Aggiungi allievo (non iscritto)</label>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
           <input type="text" class="form-input" id="pExtraAllievo" placeholder="Nome…" list="allieviList" style="flex:1;" autocomplete="off">
+          <button type="button" class="cat-chip" id="pExtraProvaChip" title="Registra anche l'iscrizione come prova gratuita" style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.3l1.5 3 3.2.5-2.4 2.3.6 3.2L6 8.8 3.1 10.3l.6-3.2L1.3 4.8l3.2-.5L6 1.3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>
+            Prova
+          </button>
           <button class="btn-secondary" id="btnPresAddExtra" style="white-space:nowrap;">Aggiungi</button>
         </div>
         <div id="presExtraList" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
@@ -1182,12 +1523,13 @@
       </div>
     </div>
     <div class="modal-footer">
+      <button class="btn-secondary btn-del" id="modalPresDelete" style="display:none;margin-right:auto;">Elimina</button>
       <button class="btn-secondary" id="modalPresCancel">Annulla</button>
       <button class="btn-primary" id="modalPresSave">Salva presenze</button>
     </div>
   </div>
 </div>
 
-<script type="module" src="app.js?v=9"></script>
+<script type="module" src="app.js?v=24"></script>
 </body>
 </html>

@@ -293,6 +293,10 @@ html, body {
   text-transform: uppercase;
   color: var(--text-dim);
 }
+/* icona calendario/controlli nativi in contrasto col fondo scuro
+   (il tema chiaro la reimposta con color-scheme: light più sotto) */
+.form-input, .filter-select { color-scheme: dark; }
+
 .form-input {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -405,6 +409,8 @@ html, body {
   transition: var(--transition);
 }
 .btn-secondary:hover { border-color: var(--border2); color: var(--text); }
+.btn-secondary.btn-del { color: var(--red); border-color: rgba(224,85,85,0.3); }
+.btn-secondary.btn-del:hover { border-color: var(--red); background: rgba(224,85,85,0.08); }
 
 .form-feedback {
   font-size: 12px;
@@ -426,6 +432,8 @@ html, body {
   margin-bottom: 16px;
   align-items: flex-end;
 }
+.filters-bar input.filter-select { width: 200px; }
+.filters-bar .btn-secondary { align-self: flex-end; }
 .filter-group { display: flex; flex-direction: column; gap: 6px; }
 .filter-select {
   background: var(--bg);
@@ -458,6 +466,30 @@ html, body {
 .data-table {
   width: 100%;
   border-collapse: collapse;
+}
+/* colonne a larghezza fissa: allineate anche quando la tabella è
+   suddivisa su più card (viste raggruppate) */
+.data-table[data-mobile-cols="corsiTable"],
+.data-table[data-mobile-cols="abbonamentiTable"],
+.data-table[data-mobile-cols="allieviTable"],
+.data-table[data-mobile-cols="iscrizioniTable"] {
+  table-layout: fixed;
+}
+/* larghezza minima assoluta: sotto una certa soglia le colonne percentuali
+   diventerebbero troppo strette (badge/date che si accavallano sulla colonna
+   affianco) — meglio uno scroll orizzontale (già gestito da .table-wrap) che
+   colonne illeggibili quando la finestra si restringe */
+.data-table[data-mobile-cols="iscrizioniTable"]   { min-width: 940px; }
+.data-table[data-mobile-cols="allieviTable"]      { min-width: 820px; }
+.data-table[data-mobile-cols="corsiTable"]        { min-width: 600px; }
+.data-table[data-mobile-cols="abbonamentiTable"]  { min-width: 680px; }
+/* celle a riga singola: se il contenuto (badge, date) non entra comunque
+   nella colonna, si tronca con "…" invece di sconfinare in quella accanto */
+.data-table[data-mobile-cols="iscrizioniTable"] td,
+.data-table[data-mobile-cols="allieviTable"] td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .data-table th {
   font-size: 10px;
@@ -531,6 +563,17 @@ html, body {
 }
 .btn-table:hover { border-color: var(--border2); color: var(--text); }
 .btn-table.btn-del:hover { border-color: rgba(224,85,85,0.3); color: var(--red); }
+
+/* Drag and drop riordino abbonamenti */
+.drag-handle-cell {
+  color: var(--text-dim);
+  cursor: grab;
+  text-align: center;
+  vertical-align: middle;
+}
+.drag-handle-cell:active { cursor: grabbing; }
+.data-table tbody tr.dragging { opacity: 0.4; }
+.data-table tbody tr.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 
 /* ─── MODAL ──────────────────────────────────────────── */
 .modal-overlay {
@@ -674,15 +717,28 @@ html, body {
 
   /* filtri: i gruppi si dividono la riga */
   .filters-bar .filter-group { flex: 1 1 45%; min-width: 0; }
-  .filters-bar .filter-select { width: 100%; }
+  .filters-bar .filter-group .filter-select { width: 100%; }
+  .filters-bar .btn-secondary { flex: 1 1 100%; }
+
+  /* header di sezione: titolo sopra, bottoni sotto a tutta riga in parti uguali */
+  .section-header { flex-direction: column; align-items: stretch; }
+  .section-header > div:last-child:not(:first-child) { width: 100%; display: flex; gap: 8px; }
+  .section-header .btn-primary,
+  .section-header .btn-secondary {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    padding: 10px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .section-header > .btn-primary { width: 100%; }
 
   /* modali: centrate, corpo scrollabile */
   .modal-overlay { padding: 14px; align-items: center; }
   .modal { width: 100% !important; max-height: calc(100vh - 60px); border-radius: 16px; }
   .modal-body { max-height: none; flex: 1; min-height: 0; }
 
-  /* bottoni header di sezione a tutta larghezza disponibile */
-  .section-header .btn-primary, .section-header .btn-secondary { flex: 1; justify-content: center; }
 }
 
 @media (max-width: 480px) {
@@ -718,21 +774,7 @@ html, body {
     flex-shrink: 0;
   }
   .m-detail-val { min-width: 0; overflow-wrap: anywhere; }
-}
-
-/* Calendario presenze su schermi stretti: pill → pallini */
-@media (max-width: 560px) {
-  .pres-cal-grid { gap: 3px; }
-  .pres-cal-day { min-height: 52px; padding: 5px 4px; }
-  .pres-cal-day-num { margin-bottom: 4px; }
-  .pres-cal-pill {
-    font-size: 0;
-    width: 7px; height: 7px;
-    padding: 0;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-  .pres-elenco-row { flex-wrap: wrap; gap: 8px 10px; }
+  .m-detail-acts { display: flex; gap: 4px; margin-left: auto; padding-left: 14px; flex-shrink: 0; }
 }
 
 /* ─── PIVOT TABLE ────────────────────────────────────────── */
@@ -846,6 +888,9 @@ body.light .pivot-total td {
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
 }
+.pres-cal-grid.pres-cal-grid-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
 .pres-cal-head {
   font-size: 10px; font-weight: 500;
   letter-spacing: 0.08em; text-transform: uppercase;
@@ -857,15 +902,18 @@ body.light .pivot-total td {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 6px;
-  min-height: 72px;
+  height: 150px;
   cursor: pointer;
   transition: var(--transition);
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 .pres-cal-day:hover { border-color: var(--border2); background: var(--surface2); }
 .pres-cal-day.pres-cal-empty { background: transparent; border-color: transparent; cursor: default; }
 .pres-cal-day.pres-cal-today { border-color: var(--accent); }
-.pres-cal-day.pres-cal-has-data { background: var(--surface2); }
+/* giorni già passati: sfondo attenuato; oggi e i giorni futuri restano sulla superficie normale */
+.pres-cal-day.pres-cal-past { background: var(--surface2); }
 .pres-cal-day-num {
   font-size: 12px; font-weight: 500;
   color: var(--text-muted);
@@ -875,27 +923,49 @@ body.light .pivot-total td {
   color: var(--accent); font-weight: 600;
 }
 .pres-cal-dot {
-  display: flex; flex-wrap: wrap; gap: 3px;
+  display: flex; flex-direction: column; flex-wrap: nowrap; gap: 3px;
+  flex: 1;
+  min-height: 0;
 }
 .pres-cal-pill {
-  font-size: 10px; line-height: 1.2;
-  padding: 2px 6px; border-radius: 99px;
-  background: var(--accent-dim); color: var(--accent);
-  white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; max-width: 100%;
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; line-height: 1.3;
+  padding: 2px 6px; border-radius: 5px;
+  white-space: nowrap;
+  max-width: 100%; min-width: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.pres-cal-pill-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.pres-cal-pill-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
 }
 
 /* Elenco presenze */
+.pres-elenco-day-group { border-bottom: 1px solid var(--border); }
+.pres-elenco-day-group:last-child { border-bottom: none; }
+.pres-elenco-day-header {
+  padding: 9px 16px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surface2);
+}
 .pres-elenco-row {
-  display: flex; align-items: flex-start; gap: 14px;
+  display: flex; flex-direction: column; gap: 8px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   transition: background var(--transition);
 }
-.pres-elenco-row:last-child { border-bottom: none; }
+.pres-elenco-day-group .pres-elenco-row:last-child { border-bottom: none; }
 .pres-elenco-row:hover { background: var(--surface2); }
+.pres-elenco-main { display: flex; align-items: center; gap: 14px; }
 .pres-elenco-date {
-  flex-shrink: 0; width: 80px;
+  flex-shrink: 0; width: 160px;
   font-size: 12px; color: var(--text-muted);
   font-weight: 500;
 }
@@ -973,6 +1043,45 @@ body.light .pivot-total td {
   transition: width 0.5s ease;
 }
 
+/* ─── PRESENZE SU MOBILE ─────────────────────────────────── */
+/* (dopo le regole base, così le sovrascrivono davvero) */
+@media (max-width: 768px) {
+  /* switcher a tutta larghezza, etichette su una riga sola */
+  .pres-view-switch { width: 100%; }
+  .pres-view-btn {
+    flex: 1;
+    justify-content: center;
+    white-space: nowrap;
+    min-width: 0;
+    padding: 7px 6px;
+    font-size: 11px;
+  }
+
+  /* calendario: pill → pallini colorati per corso */
+  .pres-cal-grid { gap: 3px; }
+  .pres-cal-day { height: 56px; padding: 5px 4px; }
+  .pres-cal-day-num { margin-bottom: 4px; }
+  .pres-cal-dot { flex-direction: row; flex-wrap: wrap; overflow: visible; gap: 4px; }
+  .pres-cal-pill {
+    background: transparent !important;
+    padding: 0; gap: 0;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    pointer-events: none; /* il tap va al giorno → modale scelta lezione */
+  }
+  .pres-cal-pill-dot { width: 7px; height: 7px; }
+  .pres-cal-pill-text { display: none; }
+
+  /* elenco: data e corso non hanno larghezze fisse */
+  .pres-elenco-date  { width: auto; }
+  .pres-elenco-corso { width: auto; flex: 1; min-width: 0; }
+}
+
+@media (max-width: 480px) {
+  /* icone via dallo switcher: spazio alle etichette */
+  .pres-view-btn svg { display: none; }
+}
+
 /* ─── PRINT (Nota mensile PDF) ───────────────────────────── */
 @media print {
   /* colori neutri per la stampa */
@@ -995,10 +1104,13 @@ body.light .pivot-total td {
   html, body { background: #fff !important; color: #111 !important; margin: 0; }
 
   /* nascondi tutto tranne la nota mensile */
-  .header, .sidebar, .sidebar-overlay, .bottom-nav, .section-header { display: none !important; }
+  .header, .sidebar, .sidebar-overlay, .bottom-nav, .section-header, .filters-bar { display: none !important; }
   .main { margin: 0 !important; padding: 16px !important; }
   .section { display: none !important; }
   #sec-nota-mensile { display: block !important; padding: 0 !important; }
+
+  /* logo dell'intestazione: nascosto a schermo, visibile solo in stampa */
+  .nota-print-logo { display: block !important; }
 
   /* nascondi i pulsanti dentro la card */
   #notaCopyBtn, #notaCsvBtn, #notaPdfBtn { display: none !important; }
@@ -1006,11 +1118,14 @@ body.light .pivot-total td {
   /* card piatta */
   .card { border: none !important; padding: 0 !important; }
 
-  /* tabella compatta */
+  /* tabella compatta, e i totali (ultima riga) solo alla fine della tabella:
+     niente <tfoot> che si ripete su ogni pagina */
   .table-wrap { overflow: visible !important; }
-  .data-table { font-size: 11px; }
-  .data-table th, .data-table td { padding: 5px 8px; }
+  .data-table { font-size: 10px; }
+  .data-table th, .data-table td { padding: 4px 7px; }
   .data-table thead th { background: #f0f0f0 !important; color: #111 !important; }
   .data-table tbody tr:hover { background: transparent !important; }
   .pivot-total td { background: #f0f0f0 !important; }
 }
+
+@page { size: auto; margin: 10mm; }
