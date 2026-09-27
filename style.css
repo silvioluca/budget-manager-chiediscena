@@ -472,7 +472,8 @@ html, body {
 .data-table[data-mobile-cols="corsiTable"],
 .data-table[data-mobile-cols="abbonamentiTable"],
 .data-table[data-mobile-cols="allieviTable"],
-.data-table[data-mobile-cols="iscrizioniTable"] {
+.data-table[data-mobile-cols="iscrizioniTable"],
+.data-table[data-mobile-cols="repIscTable"] {
   table-layout: fixed;
 }
 /* larghezza minima assoluta: sotto una certa soglia le colonne percentuali
@@ -483,10 +484,12 @@ html, body {
 .data-table[data-mobile-cols="allieviTable"]      { min-width: 820px; }
 .data-table[data-mobile-cols="corsiTable"]        { min-width: 600px; }
 .data-table[data-mobile-cols="abbonamentiTable"]  { min-width: 680px; }
+.data-table[data-mobile-cols="repIscTable"]       { min-width: 960px; }
 /* celle a riga singola: se il contenuto (badge, date) non entra comunque
    nella colonna, si tronca con "…" invece di sconfinare in quella accanto */
 .data-table[data-mobile-cols="iscrizioniTable"] td,
-.data-table[data-mobile-cols="allieviTable"] td {
+.data-table[data-mobile-cols="allieviTable"] td,
+.data-table[data-mobile-cols="repIscTable"] td {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

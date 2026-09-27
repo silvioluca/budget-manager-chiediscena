@@ -110,6 +110,7 @@ const MOBILE_COLS = {
   corsiTable:      { keep: [1, 3] },      // Nome, Tipo di abbonamento
   abbonamentiTable:{ keep: [2, 5] },      // Nome, Lezione singola (col. 1 = maniglia trascinamento)
   repPresTable:    { keep: [1, 2, 3] },   // Data, Corso, Presenti
+  repIscTable:     { keep: [1, 2, 10] },  // Allievo, Corso, Rimanenti
   riepIscTable:    { keep: [3, 6, 9] },   // Corso, Costo, Rimaste
   riepStoricoTable:{ keep: [1, 2] },      // Data, Corso (Note col tap)
   presTabellaTable:{ keep: [1, 2, 4] },   // selezione, Data, Corso
@@ -434,7 +435,7 @@ async function loadPresenze() {
 }
 
 // ── NAVIGAZIONE ──────────────────────────────────────────
-const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','corsi','personale','iscrizioni','presenze','riepilogo-allievo','compensi','nota-mensile','report-presenze'];
+const sections = ['dashboard','inserimento','elenco','annuale','generale','tabelle','allievi','corsi','personale','iscrizioni','presenze','riepilogo-allievo','compensi','nota-mensile','report-presenze','report-iscrizioni'];
 
 function showSection(name) {
   sections.forEach(s => { $('sec-'+s)?.classList.remove('active'); });
@@ -457,6 +458,7 @@ function showSection(name) {
   if (name === 'compensi')        renderCompensi();
   if (name === 'nota-mensile')    renderNotaMensile();
   if (name === 'report-presenze') renderReportPresenze();
+  if (name === 'report-iscrizioni') renderReportIscrizioni();
 
   if (window.innerWidth <= 1024) {
     $('sidebar').classList.remove('open');
@@ -4426,6 +4428,272 @@ function exportReportPresPdf() {
   );
 }
 
+// ── REPORT ISCRIZIONI ─────────────────────────────────────
+async function renderReportIscrizioni() {
+  if (!iscrizioniData.length) await loadIscrizioni();
+  if (!corsiData.length)      await loadCorsi();
+  if (!allieviData.length)    await loadAllievi();
+  if (!presenzeData.length)   await loadPresenze();
+
+  const selCorso = $('repIscCorso');
+  const curCorso = selCorso.value;
+  const corsi = [...new Set(iscrizioniData.map(r => r.corso).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it'));
+  selCorso.innerHTML = '<option value="">Tutti</option>' + corsi.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+  selCorso.value = curCorso;
+
+  const selAb = $('repIscAbbonamento');
+  const curAb = selAb.value;
+  const nomiAb = [...new Set(iscrizioniData.map(r => resolveAbbonamentoNome(r)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it'));
+  selAb.innerHTML = '<option value="">Tutti</option>' + nomiAb.map(n=>`<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+  selAb.value = curAb;
+
+  const selAS = $('repIscAS');
+  const curAS = selAS.value;
+  const anni = [...new Set(iscrizioniData.map(r => r.as).filter(Boolean))].sort().reverse();
+  selAS.innerHTML = '<option value="">Tutte</option>' + anni.map(a=>`<option value="${a}">${a}</option>`).join('');
+  selAS.value = curAS;
+
+  const nomi = new Set(allieviData.map(a => a.nomeCompleto));
+  iscrizioniData.forEach(r => { if (r.allievo) nomi.add(r.allievo); });
+  $('repIscAllieviList').innerHTML = [...nomi].sort((a,b)=>a.localeCompare(b,'it'))
+    .map(n => `<option value="${escHtml(n)}">`).join('');
+
+  renderReportIscView();
+}
+
+function getReportIscFiltered() {
+  const corso       = $('repIscCorso').value;
+  const abbonamento = $('repIscAbbonamento').value;
+  const as          = $('repIscAS').value;
+  const da          = $('repIscDa').value;
+  const a           = $('repIscA').value;
+  const allievo     = $('repIscAllievo').value.trim().toLowerCase();
+  const pagato      = $('repIscPagato').value;
+
+  return iscrizioniData.filter(r => {
+    if (corso && r.corso !== corso) return false;
+    if (abbonamento && resolveAbbonamentoNome(r) !== abbonamento) return false;
+    if (as && r.as !== as) return false;
+    if (da && r.data < da) return false;
+    if (a  && r.data > a)  return false;
+    if (allievo && r.allievo.toLowerCase() !== allievo) return false;
+    if (pagato === 'si' && !isPagato(r.pagato)) return false;
+    if (pagato === 'no' &&  isPagato(r.pagato)) return false;
+    return true;
+  }).sort((x,y) => y.data.localeCompare(x.data));
+}
+
+// Scadenza da mostrare nel report: per gli abbonamenti "a scadenza" è quella
+// già salvata sull'iscrizione; per i pacchetti (x4/x8/x12) si calcola da data
+// di acquisto + giorni di validità configurati sull'abbonamento (se previsti);
+// la prova non scade mai.
+function calcolaScadenzaReportIscrizione(isc) {
+  if (isc.tipo === 'Prova') return '';
+  if (SCAD_TIPI_SET.has(isc.tipo)) return isc.scadenza || '';
+  const scadKeys = { x4: 'x4Scad', x8: 'x8Scad', x12: 'x12Scad' };
+  const scadKey = scadKeys[isc.tipo];
+  if (!scadKey) return '';
+  const ab = abbonamentiData.find(a => a.nome === resolveAbbonamentoNome(isc));
+  const giorni = ab ? parseNum(ab[scadKey]) : 0;
+  if (!giorni) return '';
+  const d = ymdToDate(isc.data);
+  if (!d) return '';
+  d.setDate(d.getDate() + giorni);
+  return dateToYmd(d);
+}
+
+// Righe con i dati calcolati (scadenza, lezioni fatte/rimanenti) usate sia
+// dalla tabella a schermo che dagli export.
+function reportIscRighe(filtered) {
+  return filtered.map(isc => {
+    const totLezioni = lezioniDaTipo(isc.tipo);
+    const conLezioni = totLezioni > 0;
+    const fatte = conLezioni ? presenzeConsumatePerIscrizione(isc) : null;
+    const rimanenti = conLezioni ? Math.max(0, totLezioni - fatte) : null;
+    return { ...isc, scadenzaCalc: calcolaScadenzaReportIscrizione(isc), conLezioni, fatte, rimanenti };
+  });
+}
+
+const REPORT_ISC_THEAD = `<colgroup>
+  <col style="width:15%"><col style="width:13%"><col style="width:12%"><col style="width:8%">
+  <col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:9%">
+  <col style="width:9%"><col style="width:9%">
+</colgroup><thead><tr>
+  <th>Allievo</th><th>Corso</th><th>Abbonamento</th><th>Tipo</th>
+  <th>Iscrizione</th><th>Scadenza</th><th>Pagato</th><th>Data pag.</th>
+  <th style="text-align:center">Fatte</th><th style="text-align:center">Rimanenti</th>
+</tr></thead>`;
+
+function reportIscRowHtml(r) {
+  const dash = '<span style="color:var(--text-dim)">—</span>';
+  const isProva = r.tipo === 'Prova';
+  const pag = isPagato(r.pagato);
+  const tc = TIPO_ISC_COLORS[r.tipo] || { bg:'rgba(255,255,255,0.05)', border:'#555', text:'#888' };
+  const tStyle = `background:${tc.bg};border:1px solid ${tc.border};color:${tc.text};display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500;`;
+  const pagatoCell = isProva ? dash : `<span class="badge ${pag?'badge-green':'badge-red'}">${pag?'Sì':'No'}</span>`;
+  // la prova non ha "lezioni fatte/rimanenti" (è una sola lezione): nella
+  // colonna Fatte va solo se è già stata effettuata o no, Rimanenti resta vuota
+  const effettuata = r.conLezioni && r.fatte > 0;
+  const lezioniCells = isProva
+    ? `<td style="text-align:center;"><span class="badge ${effettuata?'badge-green':'badge-red'}">${effettuata?'Sì':'No'}</span></td>
+      <td style="text-align:center;">${dash}</td>`
+    : `<td style="text-align:center;">${r.conLezioni ? r.fatte : dash}</td>
+      <td style="text-align:center;font-weight:600;${r.conLezioni && r.rimanenti===0 ? 'color:#e05555' : ''}">${r.conLezioni ? r.rimanenti : dash}</td>`;
+  return `<tr>
+      <td style="font-weight:500;cursor:pointer;" onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')" title="Apri riepilogo">
+        <span style="color:var(--accent);text-decoration:underline;text-underline-offset:3px;">${escHtml(r.allievo)}</span>
+      </td>
+      <td>${corsoDisplayHtml(r.corso)}</td>
+      <td style="color:var(--text-muted)">${escHtml(resolveAbbonamentoNome(r)) || dash}</td>
+      <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
+      <td style="white-space:nowrap;">${fmtDate(r.data)}</td>
+      <td style="white-space:nowrap;color:var(--text-muted);">${r.scadenzaCalc ? fmtDate(r.scadenzaCalc) : dash}</td>
+      <td>${pagatoCell}</td>
+      <td style="color:var(--text-muted)">${(!isProva && isPagato(r.pagato) && r.dataPag) ? fmtDate(r.dataPag) : dash}</td>
+      ${lezioniCells}
+    </tr>`;
+}
+
+function renderReportIscView() {
+  const el = $('repIscContent');
+  if (!el) return;
+  const filtered = getReportIscFiltered();
+
+  if (!filtered.length) {
+    el.innerHTML = '<div class="table-empty">Nessuna iscrizione per i filtri selezionati.</div>';
+    return;
+  }
+
+  const righe = reportIscRighe(filtered);
+  const pagabili = righe.filter(r => r.tipo !== 'Prova');
+  const totPagato = pagabili.filter(r => isPagato(r.pagato)).length;
+  const totDaPagare = pagabili.length - totPagato;
+  const importoTot = pagabili.reduce((s,r) => s + (r.costo||0), 0);
+  const importoPag = pagabili.filter(r => isPagato(r.pagato)).reduce((s,r) => s + (r.costo||0), 0);
+
+  const kpiHtml = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px;">
+      <div class="kpi-card"><div class="kpi-label">Iscrizioni</div><div class="kpi-value">${righe.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Pagate</div><div class="kpi-value kpi-green">${totPagato}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Da pagare</div><div class="kpi-value${totDaPagare>0?' kpi-red':''}">${totDaPagare}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Totale</div><div class="kpi-value">${fmt(importoTot)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Incassato</div><div class="kpi-value kpi-green">${fmt(importoPag)}</div></div>
+    </div>`;
+
+  el.innerHTML = kpiHtml + `<div id="repIscTableWrap"></div>`;
+  renderReportIscTables(righe);
+}
+
+function renderReportIscTables(righe) {
+  const raggruppa = $('repIscRaggruppa').value;
+  const wrap = $('repIscTableWrap');
+  if (!wrap) return;
+
+  if (!raggruppa) {
+    wrap.innerHTML = `<div class="table-wrap">
+      <table class="data-table" id="repIscTable" data-mobile-cols="repIscTable">${REPORT_ISC_THEAD}
+        <tbody>${righe.map(reportIscRowHtml).join('')}</tbody>
+      </table>
+    </div>`;
+    return;
+  }
+
+  const tesseratoMap = {};
+  allieviData.forEach(a => { tesseratoMap[a.nomeCompleto] = isTesserato(a.tesseramento); });
+  const gruppi = {};
+  righe.forEach(r => {
+    const key = raggruppa === 'corso' ? (r.corso || '__none__')
+      : raggruppa === 'abbonamento' ? (resolveAbbonamentoNome(r) || '__none__')
+      : raggruppa === 'tipo' ? (r.tipo || '__none__')
+      : raggruppa === 'tesseramento' ? (tesseratoMap[r.allievo] ? 'Tesserati' : 'Non tesserati')
+      : (isPagato(r.pagato) ? 'Pagate' : 'Da pagare');
+    (gruppi[key] ||= []).push(r);
+  });
+  const chiavi = Object.keys(gruppi).sort((a, b) => {
+    if (raggruppa === 'pagato') return a === 'Pagate' ? -1 : b === 'Pagate' ? 1 : 0;
+    if (raggruppa === 'tesseramento') return a === 'Tesserati' ? -1 : b === 'Tesserati' ? 1 : 0;
+    if (a === '__none__') return 1;
+    if (b === '__none__') return -1;
+    return a.localeCompare(b, 'it', { numeric: true });
+  });
+  const etichettaNone = raggruppa === 'corso' ? 'Qualsiasi corso (mix)' : 'Senza tipo';
+
+  wrap.innerHTML = chiavi.map(k => `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">${k === '__none__' ? etichettaNone : escHtml(k)} <span style="color:var(--text-dim);font-weight:400;">(${gruppi[k].length})</span></div>
+      <div class="table-wrap" style="margin-top:0;">
+        <table class="data-table" data-mobile-cols="repIscTable">${REPORT_ISC_THEAD}
+          <tbody>${gruppi[k].map(reportIscRowHtml).join('')}</tbody>
+        </table>
+      </div>
+    </div>`).join('');
+}
+
+function reportIscPeriodoLabel() {
+  const da = $('repIscDa').value, a = $('repIscA').value;
+  const corso = $('repIscCorso').value || 'tutti i corsi';
+  const abbonamento = $('repIscAbbonamento').value;
+  const allievo = $('repIscAllievo').value.trim();
+  return [
+    corso,
+    abbonamento ? `abbonamento: ${abbonamento}` : '',
+    da || a ? `dal ${da ? fmtDate(da) : 'inizio'} al ${a ? fmtDate(a) : 'oggi'}` : 'tutto il periodo',
+    allievo ? `allievo: ${allievo}` : ''
+  ].filter(Boolean).join(' · ');
+}
+
+// Colonne "fatte"/"rimanenti" per gli export (CSV/PDF, senza colspan): la
+// prova non ha un conteggio lezioni, solo se è già stata effettuata o no.
+function reportIscLezioniTesto(r, vuoto) {
+  if (r.tipo === 'Prova') {
+    const effettuata = r.conLezioni && r.fatte > 0;
+    return [effettuata ? 'Sì' : 'No', vuoto];
+  }
+  return [r.conLezioni ? r.fatte : vuoto, r.conLezioni ? r.rimanenti : vuoto];
+}
+
+function exportReportIscCsv() {
+  const righe = reportIscRighe(getReportIscFiltered());
+  if (!righe.length) return appAlert('Nessuna iscrizione da esportare.');
+  downloadCsv('report_iscrizioni.csv', [
+    'Allievo;Corso;Abbonamento;Tipo;Data iscrizione;Data scadenza;Pagato;Data pagamento;Lezioni fatte;Lezioni rimanenti',
+    ...righe.map(r => {
+      const [fatteTxt, rimTxt] = reportIscLezioniTesto(r, '');
+      return [
+        `"${r.allievo.replace(/"/g,'""')}"`,
+        `"${(r.corso||'Qualsiasi corso (mix)').replace(/"/g,'""')}"`,
+        `"${(resolveAbbonamentoNome(r)||'').replace(/"/g,'""')}"`,
+        r.tipo,
+        fmtDate(r.data),
+        r.scadenzaCalc ? fmtDate(r.scadenzaCalc) : '',
+        r.tipo==='Prova' ? '' : (isPagato(r.pagato)?'Sì':'No'),
+        (r.tipo!=='Prova' && isPagato(r.pagato) && r.dataPag) ? fmtDate(r.dataPag) : '',
+        fatteTxt, rimTxt,
+      ].join(';');
+    })
+  ]);
+}
+
+function exportReportIscPdf() {
+  const righe = reportIscRighe(getReportIscFiltered());
+  if (!righe.length) return appAlert('Nessuna iscrizione da esportare.');
+  openPrintTable(
+    'Report iscrizioni',
+    `${reportIscPeriodoLabel()} · ${righe.length} iscrizioni · generato il ${fmtDate(new Date().toISOString().slice(0,10))}`,
+    ['Allievo','Corso','Abbonamento','Tipo','Iscrizione','Scadenza','Pagato','Data pag.','Fatte','Rimanenti'],
+    righe.map(r => {
+      const [fatteTxt, rimTxt] = reportIscLezioniTesto(r, '—');
+      return [
+        r.allievo, r.corso || 'Qualsiasi corso (mix)', resolveAbbonamentoNome(r) || '—', r.tipo,
+        fmtDate(r.data), r.scadenzaCalc ? fmtDate(r.scadenzaCalc) : '—',
+        r.tipo==='Prova' ? '—' : (isPagato(r.pagato)?'Sì':'No'),
+        (r.tipo!=='Prova' && isPagato(r.pagato) && r.dataPag) ? fmtDate(r.dataPag) : '—',
+        fatteTxt, rimTxt,
+      ];
+    })
+  );
+}
+
 // ── CHART CONFIG ──────────────────────────────────────────
 function chartOpts() {
   return {
@@ -5063,6 +5331,26 @@ async function init() {
   });
   $('btnRepCsv').addEventListener('click', exportReportPresCsv);
   $('btnRepPdf').addEventListener('click', exportReportPresPdf);
+
+  // Report iscrizioni
+  ['repIscCorso','repIscAbbonamento','repIscAS','repIscDa','repIscA','repIscPagato'].forEach(id => {
+    $(id).addEventListener('change', renderReportIscView);
+  });
+  $('repIscAllievo').addEventListener('input', renderReportIscView);
+  $('btnRepIscClear').addEventListener('click', () => {
+    ['repIscCorso','repIscAbbonamento','repIscAS','repIscDa','repIscA','repIscAllievo','repIscPagato'].forEach(id => { $(id).value = ''; });
+    renderReportIscView();
+  });
+  $('btnRepIscCsv').addEventListener('click', exportReportIscCsv);
+  $('btnRepIscPdf').addEventListener('click', exportReportIscPdf);
+  document.querySelectorAll('#repIscRaggruppaSwitch .pres-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#repIscRaggruppaSwitch .pres-view-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      $('repIscRaggruppa').value = btn.dataset.raggruppa;
+      renderReportIscTables(reportIscRighe(getReportIscFiltered()));
+    });
+  });
 
   initElencoFilters();
   initInserimento();
