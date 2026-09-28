@@ -375,6 +375,20 @@ html, body {
 .cat-chip:hover { border-color: var(--border2); color: var(--text); }
 .cat-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 
+/* Select multi-selezione con checkbox: pulsante chiuso (come una select) che
+   espande un pannello a checkbox (.pres-checklist) sotto di sé */
+.select-check-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  cursor: pointer; text-align: left;
+}
+.select-check-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim);
+}
+.select-check-label.has-value { color: var(--text); }
+.select-check-arrow { flex-shrink: 0; color: var(--text-dim); transition: transform var(--transition); }
+.select-check-btn.open .select-check-arrow { transform: rotate(180deg); }
+
 .divider { height: 1px; background: var(--border); }
 
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; }
@@ -1019,6 +1033,27 @@ body.light .pivot-total td {
   border: none; background: transparent; color: var(--accent);
   cursor: pointer; padding: 0; line-height: 1; font-size: 12px;
 }
+
+/* Checklist presenze: accordion "altri allievi con abbonamento compatibile" */
+.pres-accordion { margin-top: 8px; }
+.pres-accordion-toggle {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 7px 10px; border: none; background: transparent;
+  color: var(--text-muted); font-size: 12px; font-weight: 500;
+  cursor: pointer; border-radius: 7px; transition: background var(--transition);
+}
+.pres-accordion-toggle:hover { background: var(--surface); }
+.pres-accordion-chevron {
+  display: inline-block; font-size: 10px; color: var(--text-dim);
+  transition: transform var(--transition);
+}
+.pres-accordion-toggle.open .pres-accordion-chevron { transform: rotate(90deg); }
+.pres-accordion-body {
+  display: flex; flex-direction: column; gap: 4px;
+  padding-top: 4px;
+}
+.pres-check-item-extra { opacity: 0.85; }
+.pres-check-item-extra.checked { opacity: 1; }
 
 /* Per allievo heatmap */
 .pres-allievo-grid {

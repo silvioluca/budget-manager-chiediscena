@@ -332,7 +332,8 @@ async function loadIscrizioni() {
     data:        r.data || '',
     tipo:        r.tipo || '',
     abbonamento: r.abbonamento || '', // assente sulle iscrizioni storiche pre-abbonamenti
-    corso:       r.corso || '',
+    // selezione multipla: le storiche (un solo `corso` stringa, niente `corsi`) si convertono al volo
+    corsi:    Array.isArray(r.corsi) ? r.corsi : (r.corso ? [r.corso] : []),
     dataPag:  r.dataPag || '',
     pagato:   r.pagato || '',
     costo:    parseNum(r.costo),
@@ -373,7 +374,6 @@ async function loadCorsi() {
       const abDoc = {
         nome: r.nome,
         tipoErogazione: r.tipoPrezzo === 'scadenza' ? 'scadenza' : 'pacchetti',
-        contenuto: 'singolo',
         ordine: prossimoOrdine++,
         prova: parseNum(r.prova), x1: parseNum(r.x1), x4: parseNum(r.x4), x8: parseNum(r.x8), x12: parseNum(r.x12),
         x4Scad: parseNum(r.x4Scad), x8Scad: parseNum(r.x8Scad), x12Scad: parseNum(r.x12Scad),
@@ -404,7 +404,6 @@ async function loadAbbonamenti() {
     _id: r._id,
     nome: r.nome || '',
     tipoErogazione: r.tipoErogazione === 'scadenza' ? 'scadenza' : 'pacchetti',
-    contenuto: r.contenuto === 'mix' ? 'mix' : 'singolo',
     ordine: typeof r.ordine === 'number' ? r.ordine : null, // null = non ancora ordinato manualmente
     prova: parseNum(r.prova),
     x1:  parseNum(r.x1),
@@ -522,7 +521,7 @@ function renderDashDaSaldare() {
         <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;">
           <span style="cursor:pointer;color:var(--accent);text-decoration:underline;text-underline-offset:3px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
             onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')">${escHtml(r.allievo)}</span>
-          <span style="color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.corso ? escHtml(r.corso) : 'Mix'} (${escHtml(r.tipo)})</span>
+          <span style="color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${corsiDisplayHtml(r.corsi)} (${escHtml(r.tipo)})</span>
           <span style="color:var(--red);font-variant-numeric:tabular-nums;white-space:nowrap;">${r.costo ? fmt(r.costo) : '—'}</span>
         </div>`).join('')}
     </div>`;
@@ -571,7 +570,9 @@ function renderDashProssime() {
 // PIÙ chi sta esaurendo le lezioni del pacchetto anche se la scadenza a calendario
 // (se configurata) è ancora lontana. Ogni iscrizione è un caso a sé: scadenza e
 // lezioni consumate si calcolano sulla SUA data di acquisto, non si sommano tra
-// corsi diversi né con altri pacchetti dello stesso allievo. La prova non ha
+// iscrizioni diverse né con altri pacchetti dello stesso allievo. Un'iscrizione
+// con più corsi selezionati compare come candidata per ciascuno di essi (il
+// conteggio lezioni resta però lo stesso, condiviso su tutti). La prova non ha
 // scadenza: mai in questo elenco.
 function pacchettiInScadenza(entroGiorni = 15, sogliaLezioni = 1) {
   const oggi = new Date(); oggi.setHours(0,0,0,0);
@@ -583,32 +584,35 @@ function pacchettiInScadenza(entroGiorni = 15, sogliaLezioni = 1) {
   const latestPacchetto = new Map();
   const latestScadenza  = new Map();
   iscrizioniData.forEach(isc => {
-    const key = `${isc.allievo}|||${isc.corso}`;
-    if (SCAD_TIPI_SET.has(isc.tipo)) {
-      const cur = latestScadenza.get(key);
-      if (!cur || isc.data > cur.data) latestScadenza.set(key, isc);
-    } else if (isc.tipo !== 'Prova') {
-      const cur = latestPacchetto.get(key);
-      if (!cur || isc.data > cur.data) latestPacchetto.set(key, isc);
-    }
+    const corsi = isc.corsi && isc.corsi.length ? isc.corsi : [''];
+    corsi.forEach(corso => {
+      const key = `${isc.allievo}|||${corso}`;
+      if (SCAD_TIPI_SET.has(isc.tipo)) {
+        const cur = latestScadenza.get(key);
+        if (!cur || isc.data > cur.isc.data) latestScadenza.set(key, { isc, corso });
+      } else if (isc.tipo !== 'Prova') {
+        const cur = latestPacchetto.get(key);
+        if (!cur || isc.data > cur.isc.data) latestPacchetto.set(key, { isc, corso });
+      }
+    });
   });
 
   const risultati = [];
 
-  latestScadenza.forEach(isc => {
+  latestScadenza.forEach(({ isc, corso }) => {
     const scadenza = ymdToDate(isc.scadenza);
     if (!scadenza) return;
     const giorniRimanenti = Math.round((scadenza - oggi) / 86400000);
     if (giorniRimanenti > entroGiorni) return;
-    risultati.push({ allievo: isc.allievo, corso: isc.corso, tipo: isc.tipo, scadenza, giorniRimanenti, soloScadenza: true, motivo: 'data' });
+    risultati.push({ allievo: isc.allievo, corso, tipo: isc.tipo, scadenza, giorniRimanenti, soloScadenza: true, motivo: 'data' });
   });
 
-  latestPacchetto.forEach(isc => {
+  latestPacchetto.forEach(({ isc, corso }) => {
     if (isc.tipo === 'x1') return; // lezione singola: nessun "pacchetto" da monitorare
     const lezioniTotali = lezioniDaTipo(isc.tipo);
     if (!lezioniTotali) return; // tipo non riconosciuto
 
-    // lezioni di QUESTO pacchetto (per gli abbonamenti "mix" contate su qualunque corso)
+    // lezioni di QUESTO pacchetto, condivise su tutti i corsi selezionati nell'iscrizione
     const consumate = presenzeConsumatePerIscrizione(isc);
     const rimanenti = Math.max(0, lezioniTotali - consumate);
 
@@ -633,7 +637,7 @@ function pacchettiInScadenza(entroGiorni = 15, sogliaLezioni = 1) {
     // se scade a breve E sta finendo le lezioni, la scadenza a calendario resta il motivo
     // principale (è l'informazione più urgente); altrimenti segnaliamo l'esaurimento lezioni
     risultati.push({
-      allievo: isc.allievo, corso: isc.corso, tipo: isc.tipo,
+      allievo: isc.allievo, corso, tipo: isc.tipo,
       scadenza, giorniRimanenti, lezioniTotali, rimanenti, soloScadenza: false,
       motivo: scadeAPresto ? 'data' : 'lezioni',
     });
@@ -673,7 +677,7 @@ function renderDashScadenze() {
           <span class="badge ${badge}" style="white-space:nowrap;width:64px;justify-content:center;flex-shrink:0;">${label}</span>
           <span style="cursor:pointer;color:var(--accent);text-decoration:underline;text-underline-offset:3px;flex-shrink:0;max-width:34%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
             onclick="apriRiepilogoAllievo('${escHtml(p.allievo).replace(/'/g,"&#39;")}')">${escHtml(p.allievo)}</span>
-          <span style="color:var(--text-muted);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.corso ? escHtml(p.corso) : 'Mix'} (${p.tipo})</span>
+          <span style="color:var(--text-muted);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.corso ? escHtml(p.corso) : '—'} (${p.tipo})</span>
           ${p.soloScadenza ? '' : `<span style="color:var(--text-dim);font-size:11px;white-space:nowrap;">${p.rimanenti}/${p.lezioniTotali} lez.</span>`}
           ${p.scadenza ? `<span style="color:var(--text-dim);font-size:11px;white-space:nowrap;">${fmtDate(dateToYmd(p.scadenza))}</span>` : ''}
         </div>`;
@@ -2179,7 +2183,7 @@ async function saveCorso() {
   if (editCorsoId !== null) {
     const old = corsiData.find(c => c._id === editCorsoId);
     if (old && old.nome !== nome) {
-      const usato = iscrizioniData.some(r => r.corso === old.nome) || presenzeData.some(r => r.corso === old.nome);
+      const usato = iscrizioniData.some(r => r.corsi.includes(old.nome)) || presenzeData.some(r => r.corso === old.nome);
       if (usato && !await appConfirm(`Stai rinominando "${old.nome}" in "${nome}".\nLe iscrizioni e presenze esistenti restano legate al vecchio nome. Continuare?`)) return;
     }
   }
@@ -2204,7 +2208,7 @@ async function saveCorso() {
 async function deleteCorso(id) {
   const c = corsiData.find(c => c._id === id);
   if (!c) return;
-  const usato = iscrizioniData.some(r => r.corso === c.nome) || presenzeData.some(r => r.corso === c.nome);
+  const usato = iscrizioniData.some(r => r.corsi.includes(c.nome)) || presenzeData.some(r => r.corso === c.nome);
   const msg = usato
     ? `Il corso "${c.nome}" ha iscrizioni o presenze registrate (che NON verranno cancellate).\nEliminarlo comunque?`
     : `Eliminare il corso "${c.nome}"?`;
@@ -2218,17 +2222,17 @@ async function deleteCorso(id) {
   }
 }
 
-// ── ABBONAMENTI (prezzi: a pacchetti o a scadenza; contenuto: singolo corso o mix) ──
+// ── ABBONAMENTI (solo pagamento: prezzi a pacchetti o a scadenza; i corsi si scelgono in iscrizione) ──
 let editAbbonamentoId = null;
 
 const ABBONAMENTI_THEAD = `<colgroup>
   <col style="width:28px">
-  <col style="width:21%"><col style="width:15%"><col style="width:15%">
-  <col style="width:13%"><col style="width:13%"><col style="width:8%">
+  <col style="width:26%"><col style="width:16%">
+  <col style="width:16%"><col style="width:14%"><col style="width:10%">
   <col style="width:70px">
 </colgroup><thead><tr>
   <th></th>
-  <th>Nome</th><th>Erogazione</th><th>Contenuto</th>
+  <th>Nome</th><th>Erogazione</th>
   <th style="text-align:right">Lezione singola</th>
   <th style="text-align:right">x4 / x8 / x12</th>
   <th></th>
@@ -2246,7 +2250,6 @@ const DRAG_HANDLE_SVG = `<svg width="10" height="14" viewBox="0 0 10 14" fill="c
 // resta per l'allineamento ma senza maniglia trascinabile.
 function abbonamentoRowHtml(a, draggable = true) {
   const dash = '<span style="color:var(--text-dim)">—</span>';
-  const contenutoLabel = a.contenuto === 'mix' ? 'Mix (qualsiasi corso)' : 'Singolo corso';
   const isScadenza = a.tipoErogazione === 'scadenza';
   const handleCell = draggable
     ? `<td class="drag-handle-cell" draggable="true" title="Trascina per riordinare">${DRAG_HANDLE_SVG}</td>`
@@ -2255,7 +2258,6 @@ function abbonamentoRowHtml(a, draggable = true) {
       ${handleCell}
       <td style="font-weight:500">${escHtml(a.nome)}</td>
       <td>${isScadenza ? 'A scadenza' : 'A pacchetti'}</td>
-      <td style="color:var(--text-muted)">${contenutoLabel}</td>
       ${isScadenza ? `
       <td style="text-align:right;font-variant-numeric:tabular-nums">${a.costoAbbonamento ? fmt(a.costoAbbonamento) : dash}</td>
       <td style="color:var(--text-muted)">${escHtml(a.scadenzaTipo) || dash}</td>
@@ -2303,9 +2305,7 @@ function renderAbbonamentiTables() {
 
   const gruppi = {};
   abbonamentiData.forEach(a => {
-    const key = raggruppa === 'contenuto'
-      ? (a.contenuto === 'mix' ? 'Mix' : 'Singolo corso')
-      : (a.tipoErogazione === 'scadenza' ? 'A scadenza' : 'A pacchetti');
+    const key = a.tipoErogazione === 'scadenza' ? 'A scadenza' : 'A pacchetti';
     (gruppi[key] ||= []).push(a);
   });
   const chiavi = Object.keys(gruppi).sort((a, b) => a.localeCompare(b, 'it'));
@@ -2377,14 +2377,6 @@ async function reorderAbbonamenti(srcId, targetId) {
   }
 }
 
-// Toggle Singolo corso / Mix nella modale abbonamento
-function setAbbonamentoContenuto(val) {
-  document.querySelectorAll('#abContenutoGrid .cat-chip').forEach(c => {
-    c.classList.toggle('active', c.dataset.contenuto === val);
-  });
-  $('abContenuto').value = val;
-}
-
 // Toggle A pacchetti / A scadenza nella modale abbonamento
 function setAbbonamentoTipoErogazione(val) {
   document.querySelectorAll('#abTipoErogazioneGrid .cat-chip').forEach(c => {
@@ -2408,7 +2400,6 @@ function openNewAbbonamento() {
   editAbbonamentoId = null;
   $('modalAbbonamentoTitle').textContent = 'Nuovo abbonamento';
   ['abNome','abX1','abX4','abX8','abX12','abX4Scad','abX8Scad','abX12Scad','abCostoAbb','abScadData'].forEach(id => { $(id).value=''; });
-  setAbbonamentoContenuto('singolo');
   setAbbonamentoTipoErogazione('pacchetti');
   setAbbonamentoScadTipo('');
   $('modalAbbonamentoOverlay').style.display = 'flex';
@@ -2430,7 +2421,6 @@ function openEditAbbonamento(id) {
   $('abX12Scad').value = a.x12Scad || '';
   $('abCostoAbb').value = a.costoAbbonamento || '';
   $('abScadData').value = a.scadenzaData || '';
-  setAbbonamentoContenuto(a.contenuto);
   setAbbonamentoTipoErogazione(a.tipoErogazione);
   setAbbonamentoScadTipo(a.scadenzaTipo);
   $('modalAbbonamentoOverlay').style.display = 'flex';
@@ -2440,7 +2430,6 @@ function closeAbbonamentoModal() { $('modalAbbonamentoOverlay').style.display = 
 
 async function saveAbbonamento() {
   const nome = $('abNome').value.trim();
-  const contenuto = $('abContenuto').value;
   const tipoErogazione = $('abTipoErogazione').value;
   const x1  = parseFloat($('abX1').value)  || 0;
   const x4  = parseFloat($('abX4').value)  || 0;
@@ -2457,7 +2446,7 @@ async function saveAbbonamento() {
   if (tipoErogazione === 'scadenza' && !scadenzaTipo) return appAlert('Seleziona la durata dell\'abbonamento.');
   if (tipoErogazione === 'scadenza' && scadenzaTipo === 'Personalizzata' && !scadenzaData) return appAlert('Inserisci la data di scadenza.');
 
-  const docData = { nome, contenuto, tipoErogazione, x1, x4, x8, x12, x4Scad, x8Scad, x12Scad, costoAbbonamento, scadenzaTipo, scadenzaData };
+  const docData = { nome, tipoErogazione, x1, x4, x8, x12, x4Scad, x8Scad, x12Scad, costoAbbonamento, scadenzaTipo, scadenzaData };
 
   // rinomina: le iscrizioni puntano all'abbonamento per nome
   if (editAbbonamentoId !== null) {
@@ -2657,7 +2646,7 @@ function applyIscrizioniFilters() {
   const as     = $('filterAS').value;
   const pag    = $('filterPagato').value;
   let filtered = iscrizioniData.filter(r => {
-    if (search && !r.allievo.toLowerCase().includes(search) && !r.corso.toLowerCase().includes(search)) return false;
+    if (search && !r.allievo.toLowerCase().includes(search) && !(r.corsi||[]).some(c => c.toLowerCase().includes(search))) return false;
     if (as && r.as !== as) return false;
     if (pag === 'si'  && !isPagato(r.pagato)) return false;
     if (pag === 'no'  &&  isPagato(r.pagato)) return false;
@@ -2679,14 +2668,20 @@ const ISCRIZIONI_THEAD = `<colgroup>
   <col style="width:13%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
   <col style="width:8%"><col style="width:72px">
 </colgroup><thead><tr>
-  <th>Allievo</th><th>A.S.</th><th>Data</th><th>Tipo</th><th>Corso</th>
+  <th>Allievo</th><th>A.S.</th><th>Data</th><th>Tipo</th><th>Corsi</th>
   <th>Data pag.</th><th>Pagato</th><th style="text-align:right">Costo</th><th>Note</th>
   <th style="width:72px"></th>
 </tr></thead>`;
 
 // Corso di un'iscrizione: vuoto per gli abbonamenti "mix" (valgono su qualsiasi corso)
-function corsoDisplayHtml(corso) {
-  return corso ? escHtml(corso) : '<span style="color:var(--text-dim);font-style:italic;">Qualsiasi corso (mix)</span>';
+// Elenco dei corsi di un'iscrizione (selezione multipla): come badge nella UI
+// o come semplice testo (per CSV/PDF, con `vuoto` a piacere per il fallback).
+function corsiDisplayHtml(corsi) {
+  if (!corsi || !corsi.length) return '<span style="color:var(--text-dim);font-style:italic;">Nessun corso</span>';
+  return corsi.map(c => escHtml(c)).join(', ');
+}
+function corsiDisplayText(corsi, vuoto) {
+  return (corsi && corsi.length) ? corsi.join(', ') : (vuoto ?? '');
 }
 
 function iscrizioneRowHtml(r) {
@@ -2706,7 +2701,7 @@ function iscrizioneRowHtml(r) {
       <td><span class="badge badge-gold">${escHtml(r.as)}</span></td>
       <td>${fmtDate(r.data)}</td>
       <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
-      <td>${corsoDisplayHtml(r.corso)}</td>
+      <td>${corsiDisplayHtml(r.corsi)}</td>
       <td>${isProva ? '<span style="color:var(--text-dim)">—</span>' : fmtDate(r.dataPag)}</td>
       <td>${pagatoCell}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${costoCell}</td>
@@ -2741,8 +2736,12 @@ function renderIscrizioniTables(filtered) {
   allieviData.forEach(a => { tesseratoMap[a.nomeCompleto] = isTesserato(a.tesseramento); });
   const gruppi = {};
   filtered.forEach(r => {
+    if (raggruppa === 'corso') {
+      const corsi = (r.corsi && r.corsi.length) ? r.corsi : ['__none__'];
+      corsi.forEach(c => (gruppi[c] ||= []).push(r));
+      return;
+    }
     const key = raggruppa === 'tipo' ? (r.tipo || '__none__')
-      : raggruppa === 'corso' ? (r.corso || '__none__')
       : (tesseratoMap[r.allievo] ? 'Tesserati' : 'Non tesserati');
     (gruppi[key] ||= []).push(r);
   });
@@ -2752,7 +2751,7 @@ function renderIscrizioniTables(filtered) {
     if (b === '__none__') return -1;
     return a.localeCompare(b, 'it', { numeric: true });
   });
-  const etichettaNone = raggruppa === 'corso' ? 'Qualsiasi corso (mix)' : 'Senza tipo';
+  const etichettaNone = raggruppa === 'corso' ? 'Nessun corso' : 'Senza tipo';
 
   wrap.innerHTML = chiavi.map(k => `
     <div class="card" style="margin-bottom:16px;">
@@ -2800,30 +2799,63 @@ function calcolaScadenzaIscrizione(abbonamento, dataIscrizione) {
   return dateToYmd(d);
 }
 
-// Corso selezionabile in base all'abbonamento scelto: "singolo" mostra solo il
-// corso collegato (già selezionato), "mix" lascia scegliere liberamente tra tutti.
-// Il corso si sceglie sempre liberamente qui, indipendentemente dall'abbonamento
-// (l'abbonamento riguarda solo il pagamento): il menu si popola una volta sola
-// all'apertura della modale, non ad ogni cambio di abbonamento.
-// Corso selezionabile in iscrizione: solo quelli che accettano l'abbonamento
-// attualmente scelto (un corso senza restrizioni ne accetta qualunque).
-// `selected`, se indicato, è il valore da preselezionare (usato in apertura
-// modale); altrimenti si prova a mantenere la scelta corrente se resta valida
-// dopo il filtro (usato quando si cambia abbonamento a modale già aperta).
-function populateCorsoSelectIscrizione(selected) {
+// Select multi-selezione "Corsi" nella modale iscrizione: un pulsante chiuso
+// (come una select) che mostra i corsi scelti ed espande, al click, un pannello
+// con una checkbox per corso. Mostra solo i corsi che accettano l'abbonamento
+// attualmente scelto (un corso senza restrizioni ne accetta qualunque),
+// selezione libera e multipla — l'allievo comparirà nell'elenco presenze di
+// OGNI corso selezionato, con lezioni rimanenti condivise tra tutti (pool
+// unico di consumo). `selected` è l'elenco corsi da preselezionare (usato in
+// apertura modale); se omesso si mantiene la selezione corrente ancora valida
+// dopo il filtro (cambio abbonamento a modale già aperta).
+function populateCorsiChipGridIscrizione(selected) {
   const nomeAb = $('iAbbonamento').value;
-  const sel = $('iCorso');
-  const daMantenere = selected !== undefined ? selected : sel.value;
+  const panel = $('iCorsiSelectPanel');
+  const daMantenere = selected !== undefined ? selected : (JSON.parse($('iCorsi').value || '[]'));
   let corsiValidi = corsiData.filter(c => !nomeAb || !c.abbonamenti?.length || c.abbonamenti.includes(nomeAb));
-  // non far sparire dal menu il corso già salvato sull'iscrizione anche se nel
-  // frattempo non accetta più questo abbonamento: si eviterebbe altrimenti di
-  // perdere silenziosamente il dato aprendo in modifica un'iscrizione storica
-  if (daMantenere && !corsiValidi.some(c => c.nome === daMantenere)) {
-    const corsoEsistente = corsiData.find(c => c.nome === daMantenere);
-    if (corsoEsistente) corsiValidi = [corsoEsistente, ...corsiValidi];
-  }
-  sel.innerHTML = '<option value="">— seleziona corso —</option>' +
-    corsiValidi.map(c => `<option value="${escHtml(c.nome)}"${c.nome===daMantenere?' selected':''}>${escHtml(c.nome)}</option>`).join('');
+  // non far sparire dal pannello i corsi già salvati sull'iscrizione anche se
+  // nel frattempo non accettano più questo abbonamento: si eviterebbe altrimenti
+  // di perdere silenziosamente il dato aprendo in modifica un'iscrizione storica
+  daMantenere.forEach(nome => {
+    if (!corsiValidi.some(c => c.nome === nome)) {
+      const corsoEsistente = corsiData.find(c => c.nome === nome);
+      if (corsoEsistente) corsiValidi = [...corsiValidi, corsoEsistente];
+    }
+  });
+  const selSet = new Set(daMantenere.filter(nome => corsiValidi.some(c => c.nome === nome)));
+  panel.innerHTML = corsiValidi.length ? corsiValidi.map(c =>
+    `<label class="pres-check-item${selSet.has(c.nome) ? ' checked' : ''}" data-corsonome="${escHtml(c.nome)}">
+      <input type="checkbox" ${selSet.has(c.nome) ? 'checked' : ''}>
+      <span class="pres-check-name">${escHtml(c.nome)}</span>
+    </label>`
+  ).join('') : '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Nessun corso disponibile per questo abbonamento</div>';
+  $('iCorsi').value = JSON.stringify([...selSet]);
+  updateIscCorsiSelectLabel([...selSet]);
+  panel.querySelectorAll('.pres-check-item').forEach(item => {
+    item.querySelector('input[type=checkbox]').addEventListener('change', (e) => {
+      item.classList.toggle('checked', e.target.checked);
+      const scelti = [...panel.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.closest('.pres-check-item').dataset.corsonome);
+      $('iCorsi').value = JSON.stringify(scelti);
+      updateIscCorsiSelectLabel(scelti);
+    });
+  });
+}
+
+// Etichetta del pulsante "select" dei corsi: elenco scelto, o un placeholder.
+function updateIscCorsiSelectLabel(scelti) {
+  const label = $('iCorsiSelectLabel');
+  if (!label) return;
+  label.textContent = scelti.length ? scelti.join(', ') : '— seleziona corsi —';
+  label.classList.toggle('has-value', scelti.length > 0);
+}
+
+function toggleIscCorsiPanel(forceClose) {
+  const panel = $('iCorsiSelectPanel');
+  const btn   = $('iCorsiSelectBtn');
+  if (!panel || !btn) return;
+  const willOpen = forceClose ? false : panel.style.display === 'none';
+  panel.style.display = willOpen ? '' : 'none';
+  btn.classList.toggle('open', willOpen);
 }
 
 // Adatta la modale iscrizione all'abbonamento selezionato: chip pacchetti oppure
@@ -2834,15 +2866,9 @@ function updateIscrizioneAbbonamentoMode() {
   // pacchetti): selezionandolo il tipo è fisso e la lezione è sempre gratuita.
   const isProva     = !!ab && ab.nome === 'Prova';
   const isScadenza  = !!ab && ab.tipoErogazione === 'scadenza' && !isProva;
-  const isMix       = !!ab && ab.contenuto === 'mix';
 
-  // abbonamento "mix": vale su qualsiasi corso, niente scelta qui — l'allievo
-  // comparirà nell'elenco presenze di ogni corso. Altrimenti il menu si filtra
-  // ai soli corsi che accettano l'abbonamento scelto.
-  $('iCorsoGroup').style.display   = isMix ? 'none' : '';
-  $('iCorsoMixInfo').style.display = isMix ? '' : 'none';
-  if (isMix) $('iCorso').value = '';
-  else populateCorsoSelectIscrizione();
+  // la griglia corsi si filtra ai soli corsi che accettano l'abbonamento scelto
+  populateCorsiChipGridIscrizione();
 
   $('iTipoPacchettiGroup').style.display = (isScadenza || isProva) ? 'none' : '';
   $('iTipoScadenzaInfo').style.display   = isScadenza ? '' : 'none';
@@ -2887,7 +2913,8 @@ function openNuovaIscrizione() {
   $('iCosto').value = '';
   setTipoIscChip('');
   populateAbbonamentiSelect('');
-  populateCorsoSelectIscrizione('');
+  populateCorsiChipGridIscrizione([]);
+  toggleIscCorsiPanel(true);
   updateIscrizioneAbbonamentoMode();
   $('iTesseraAllievo').checked = false;
   $('iTesseramentoScad').value = '';
@@ -2910,9 +2937,10 @@ function openEditIscrizione(id) {
   $('iCosto').value    = r.costo || '';
   setTipoIscChip(r.tipo);
   // iscrizioni storiche (pre-abbonamenti): niente `abbonamento` salvato, l'operatore
-  // può assegnarlo; il corso resta comunque quello già registrato sull'iscrizione
+  // può assegnarlo; i corsi restano comunque quelli già registrati sull'iscrizione
   populateAbbonamentiSelect(r.abbonamento || '');
-  populateCorsoSelectIscrizione(r.corso);
+  populateCorsiChipGridIscrizione(r.corsi || []);
+  toggleIscCorsiPanel(true);
   updateIscrizioneAbbonamentoMode();
   // azione "una tantum": non è un dato salvato sull'iscrizione, si riparte scollegata
   $('iTesseraAllievo').checked = false;
@@ -2995,8 +3023,8 @@ async function saveIscrizione() {
   const tipo        = $('iTipo').value;
   const abbonamento = $('iAbbonamento').value;
   const abbonamentoObj = abbonamentiData.find(a => a.nome === abbonamento);
-  const isMix       = !!abbonamentoObj && abbonamentoObj.contenuto === 'mix';
-  const corso       = isMix ? '' : $('iCorso').value;
+  let corsi;
+  try { corsi = JSON.parse($('iCorsi').value || '[]'); } catch (e) { corsi = []; }
   const dataPag     = $('iDataPag').value;
   const pagato      = $('iPagato').value || 'No';
   const costo       = parseFloat($('iCosto').value) || 0;
@@ -3005,7 +3033,7 @@ async function saveIscrizione() {
   if (!allievo)     return appAlert('Seleziona un allievo.');
   if (!abbonamento) return appAlert('Seleziona un abbonamento.');
   if (!tipo)        return appAlert('Seleziona il tipo.');
-  if (!corso && !isMix) return appAlert('Seleziona un corso.');
+  if (!corsi.length) return appAlert('Seleziona almeno un corso.');
   if (pagato === 'Sì' && !dataPag) return appAlert('Inserisci la data di pagamento.');
 
   // una sola prova per allievo, indipendentemente dal corso
@@ -3019,7 +3047,7 @@ async function saveIscrizione() {
   const scadenza = tipo !== 'Prova' && abbonamentoObj && abbonamentoObj.tipoErogazione === 'scadenza'
     ? calcolaScadenzaIscrizione(abbonamentoObj, data) : '';
 
-  const docData = { allievo, as, data, tipo, abbonamento, corso, dataPag: tipo === 'Prova' ? '' : dataPag, pagato: tipo === 'Prova' ? 'No' : pagato, costo, note, scadenza };
+  const docData = { allievo, as, data, tipo, abbonamento, corsi, dataPag: tipo === 'Prova' ? '' : dataPag, pagato: tipo === 'Prova' ? 'No' : pagato, costo, note, scadenza };
 
   const aggiornaTesseramento = $('iTesseraAllievo').checked;
   const tesseramentoScad = $('iTesseramentoScad').value;
@@ -3056,7 +3084,7 @@ async function saveIscrizione() {
 async function deleteIscrizione(id) {
   const r = iscrizioniData.find(r => r._id === id);
   if (!r) return;
-  if (!await appConfirm(`Eliminare l'iscrizione di "${r.allievo}" — ${r.corso} (${r.tipo})?\nL'operazione non può essere annullata.`)) return;
+  if (!await appConfirm(`Eliminare l'iscrizione di "${r.allievo}" — ${corsiDisplayText(r.corsi, 'nessun corso')} (${r.tipo})?\nL'operazione non può essere annullata.`)) return;
   try {
     await fsDelete(COLL_ISCRIZIONI, id);
     iscrizioniData = iscrizioniData.filter(r => r._id !== id);
@@ -3661,6 +3689,20 @@ function getAllieviForCorso(nomeCorso) {
   return iscr;
 }
 
+// Tutti gli altri allievi (intera anagrafica) NON iscritti a questo corso:
+// candidati mostrati nell'accordion "altri allievi" della checklist presenze,
+// per registrare comunque una presenza occasionale fuori dai propri corsi.
+function getAllieviCompatibiliNonIscritti(nomeCorso) {
+  const giaIscritti = new Set(getAllieviForCorso(nomeCorso));
+  const nomi = new Set(allieviData.map(a => a.nomeCompleto).filter(Boolean));
+  // include anche eventuali allievi presenti solo nelle iscrizioni ma non
+  // (ancora) in anagrafica, per coerenza con getAllieviForCorso
+  iscrizioniData.forEach(r => { if (r.allievo) nomi.add(r.allievo); });
+  return [...nomi]
+    .filter(nome => !giaIscritti.has(nome))
+    .sort((a,b)=>a.localeCompare(b,'it'));
+}
+
 // Helper: lezioni totali da tipo iscrizione
 function lezioniDaTipo(tipo) {
   if (tipo === 'x1')    return 1;
@@ -3674,41 +3716,34 @@ function lezioniDaTipo(tipo) {
   return 0;
 }
 
-// L'abbonamento "mix" è valido su qualunque corso: le sue presenze si contano
-// su TUTTI i corsi dell'allievo, non solo quello dell'iscrizione. Le iscrizioni
-// storiche (senza `abbonamento`, pre-migrazione) restano legate al solo corso.
 // Nome dell'abbonamento di un'iscrizione: quello salvato, oppure (iscrizioni
-// storiche pre-abbonamenti) il nome del corso — la migrazione crea per ogni
-// vecchio corso un abbonamento "singolo" con lo stesso identico nome.
+// storiche pre-abbonamenti) il nome del primo corso — la migrazione crea per
+// ogni vecchio corso un abbonamento "singolo" con lo stesso identico nome.
 function resolveAbbonamentoNome(isc) {
-  return isc.abbonamento || isc.corso;
+  return isc.abbonamento || (isc.corsi && isc.corsi[0]) || '';
 }
 
-function isAbbonamentoMix(nomeAbbonamento) {
-  if (!nomeAbbonamento) return false;
-  const ab = abbonamentiData.find(a => a.nome === nomeAbbonamento);
-  return !!ab && ab.contenuto === 'mix';
-}
-
-// Un'iscrizione "copre" un corso se è proprio quel corso, oppure se il suo
-// abbonamento è "mix" (valido su qualunque corso, quindi anche su questo).
+// Un'iscrizione "copre" un corso se quel corso è tra quelli selezionati
+// all'iscrizione: le lezioni rimanenti sono condivise tra tutti i corsi
+// dell'iscrizione (pool di consumo unico).
 function iscrizioneCopreCorso(isc, nomeCorso) {
-  return isc.corso === nomeCorso || isAbbonamentoMix(resolveAbbonamentoNome(isc));
+  return !!(isc.corsi && isc.corsi.includes(nomeCorso));
 }
 
 // Presenze consumate da una specifica iscrizione (pacchetto/prova), contate
-// dalla sua data di acquisto in poi. `presenzeList` è opzionale (default: tutte).
-// `finoAGiornoEsclusivo`, se indicato, esclude le presenze da quella data in
-// poi: serve a non far "sconfinare" nel conteggio di un vecchio pacchetto (es.
-// la prova) le presenze registrate DOPO che l'allievo ne ha acquistato uno
-// nuovo — altrimenti riaprendo la prova risulterebbe già "consumata" dalle
-// lezioni fatte con il pacchetto successivo.
+// dalla sua data di acquisto in poi, su QUALUNQUE dei corsi selezionati
+// all'iscrizione (pool di consumo condiviso). `presenzeList` è opzionale
+// (default: tutte). `finoAGiornoEsclusivo`, se indicato, esclude le presenze
+// da quella data in poi: serve a non far "sconfinare" nel conteggio di un
+// vecchio pacchetto (es. la prova) le presenze registrate DOPO che l'allievo
+// ne ha acquistato uno nuovo — altrimenti riaprendo la prova risulterebbe già
+// "consumata" dalle lezioni fatte con il pacchetto successivo.
 function presenzeConsumatePerIscrizione(isc, presenzeList, finoAGiornoEsclusivo) {
-  const mix = isAbbonamentoMix(resolveAbbonamentoNome(isc));
+  const corsi = isc.corsi || [];
   return (presenzeList || presenzeData).filter(p =>
     p.allievi.includes(isc.allievo) && p.giorno >= isc.data
     && (!finoAGiornoEsclusivo || p.giorno < finoAGiornoEsclusivo)
-    && (mix || p.corso === isc.corso)
+    && corsi.includes(p.corso)
   ).length;
 }
 
@@ -3770,6 +3805,25 @@ function presBadgeHtml(nome, nomeCorso, isCheckedNow) {
   return `<span class="pres-check-badge" style="font-size:10px;color:var(--text-dim);margin-left:auto;flex-shrink:0;">${rimanenti} rim.</span>`;
 }
 
+// Badge per le righe dell'accordion "altri allievi" (non iscritti a questo
+// corso): mostra il loro abbonamento più recente, se ne hanno uno, invece
+// delle lezioni rimaste — qui non si applica il conteggio di questo corso.
+function presExtraBadgeHtml(nome) {
+  const isc = iscrizioniData.filter(r => r.allievo === nome).sort((a,b) => String(b.data).localeCompare(String(a.data)))[0];
+  const nomeAb = isc ? resolveAbbonamentoNome(isc) : '';
+  if (!nomeAb) return '';
+  return `<span class="pres-check-badge" style="font-size:10px;padding:1px 6px;border-radius:99px;background:var(--accent-dim);color:var(--accent);margin-left:auto;flex-shrink:0;">${escHtml(nomeAb)}</span>`;
+}
+
+function togglePresAccordion() {
+  const body = document.getElementById('presAccordionBody');
+  const toggle = document.getElementById('presAccordionToggle');
+  if (!body || !toggle) return;
+  const willOpen = body.style.display === 'none';
+  body.style.display = willOpen ? '' : 'none';
+  toggle.classList.toggle('open', willOpen);
+}
+
 function renderPresChecklist(checked) {
   const nomeCorso = document.getElementById('pCorso').value;
   const list      = document.getElementById('presAllieviList');
@@ -3779,18 +3833,20 @@ function renderPresChecklist(checked) {
     return;
   }
 
-  const iscritti  = getAllieviForCorso(nomeCorso);
-  const checkedSet= new Set(checked);
+  const iscritti    = getAllieviForCorso(nomeCorso);
+  const nonIscritti = getAllieviCompatibiliNonIscritti(nomeCorso);
+  const checkedSet  = new Set(checked);
 
-  if (!iscritti.length) {
+  if (!iscritti.length && !nonIscritti.length) {
     list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Nessun allievo iscritto a questo corso.</div>';
     updatePresConteggio();
     return;
   }
 
-  const allChecked = iscritti.every(n => checkedSet.has(n));
-  list.innerHTML = `
-    <label class="pres-check-item" id="presCheckAll" data-nome="__all__"
+  const allChecked = iscritti.length > 0 && iscritti.every(n => checkedSet.has(n));
+  const primaryHtml = !iscritti.length
+    ? '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Nessun allievo iscritto a questo corso.</div>'
+    : `<label class="pres-check-item" id="presCheckAll" data-nome="__all__"
       style="border-bottom:1px solid var(--border);margin-bottom:4px;padding-bottom:8px;">
       <input type="checkbox" id="cbSelectAll" ${allChecked?'checked':''}
         onchange="toggleSelectAll(this)">
@@ -3806,14 +3862,37 @@ function renderPresChecklist(checked) {
       </label>`;
     }).join('')}`;
 
+  const accordionHtml = !nonIscritti.length ? '' : `
+    <div class="pres-accordion" id="presAccordionWrap">
+      <button type="button" class="pres-accordion-toggle" id="presAccordionToggle" onclick="togglePresAccordion()">
+        <span class="pres-accordion-chevron">&#9656;</span>
+        <span>Altri allievi</span>
+        <span style="color:var(--text-dim);font-weight:400;">(${nonIscritti.length})</span>
+      </button>
+      <div class="pres-accordion-body" id="presAccordionBody" style="display:none;">
+        ${nonIscritti.map(nome => {
+          const isCk = checkedSet.has(nome);
+          return `<label class="pres-check-item pres-check-item-extra${isCk?' checked':''}" data-nome="${escHtml(nome)}">
+            <input type="checkbox" ${isCk?'checked':''} onchange="onPresCheck(this)">
+            <span class="pres-check-name">${escHtml(nome)}</span>
+            ${presExtraBadgeHtml(nome)}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  list.innerHTML = primaryHtml + accordionHtml;
   updatePresConteggio();
 }
 
-// Ricalcola e sostituisce il badge di una riga in base allo stato attuale della sua checkbox
+// Ricalcola e sostituisce il badge di una riga in base allo stato attuale della sua checkbox.
+// Le righe dell'accordion (non iscritti) hanno un badge statico (l'abbonamento),
+// non legato alle lezioni rimaste su QUESTO corso: non va ricalcolato.
 function updatePresRowBadge(item) {
   if (!item) return;
   const nome = item.dataset.nome;
   if (!nome || nome === '__all__') return;
+  if (item.classList.contains('pres-check-item-extra')) return;
   const nomeCorso = document.getElementById('pCorso').value;
   const isChecked = item.querySelector('input[type=checkbox]')?.checked || false;
   const html = presBadgeHtml(nome, nomeCorso, isChecked);
@@ -3822,8 +3901,10 @@ function updatePresRowBadge(item) {
   else if (html) item.querySelector('.pres-check-name').insertAdjacentHTML('afterend', html);
 }
 
+// "Seleziona tutti" agisce solo sugli iscritti in prima lista (figli diretti
+// di #presAllieviList): non spunta anche l'accordion dei non iscritti.
 function toggleSelectAll(cb) {
-  document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll) input[type=checkbox]').forEach(c => {
+  document.querySelectorAll('#presAllieviList > .pres-check-item:not(#presCheckAll) input[type=checkbox]').forEach(c => {
     c.checked = cb.checked;
     const item = c.closest('.pres-check-item');
     item.classList.toggle('checked', cb.checked);
@@ -3835,9 +3916,9 @@ function toggleSelectAll(cb) {
 function onPresCheck(cb) {
   const item = cb.closest('.pres-check-item');
   if (item) item.classList.toggle('checked', cb.checked);
-  const all = [...document.querySelectorAll('#presAllieviList .pres-check-item:not(#presCheckAll) input[type=checkbox]')];
+  const all = [...document.querySelectorAll('#presAllieviList > .pres-check-item:not(#presCheckAll) input[type=checkbox]')];
   const cbAll = document.getElementById('cbSelectAll');
-  if (cbAll) cbAll.checked = all.every(c=>c.checked);
+  if (cbAll) cbAll.checked = all.length > 0 && all.every(c=>c.checked);
   updatePresRowBadge(item);
   updatePresConteggio();
 }
@@ -4131,7 +4212,7 @@ function renderRiepilogoAllievo(nomeCompleto) {
               return `<tr>
                 <td style="color:var(--text-muted)">${escHtml(r.as)}</td>
                 <td style="color:var(--text-muted)">${fmtDate(r.data)}</td>
-                <td style="font-weight:500">${corsoDisplayHtml(r.corso)}</td>
+                <td style="font-weight:500">${corsiDisplayHtml(r.corsi)}</td>
                 <td><span style="background:var(--accent-dim);border:1px solid rgba(201,169,110,0.2);color:var(--accent);padding:2px 8px;border-radius:99px;font-size:11px;">${escHtml(r.tipo)}</span></td>
                 <td>${isProva ? '<span style="color:var(--text-dim)">—</span>' : `
                   <span class="badge ${pagatoOk ? 'badge-green' : 'badge-red'}">${pagatoOk ? 'Sì' : 'No'}</span>
@@ -4437,7 +4518,7 @@ async function renderReportIscrizioni() {
 
   const selCorso = $('repIscCorso');
   const curCorso = selCorso.value;
-  const corsi = [...new Set(iscrizioniData.map(r => r.corso).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it'));
+  const corsi = [...new Set(iscrizioniData.flatMap(r => r.corsi || []))].sort((a,b)=>a.localeCompare(b,'it'));
   selCorso.innerHTML = '<option value="">Tutti</option>' + corsi.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
   selCorso.value = curCorso;
 
@@ -4471,7 +4552,7 @@ function getReportIscFiltered() {
   const pagato      = $('repIscPagato').value;
 
   return iscrizioniData.filter(r => {
-    if (corso && r.corso !== corso) return false;
+    if (corso && !(r.corsi || []).includes(corso)) return false;
     if (abbonamento && resolveAbbonamentoNome(r) !== abbonamento) return false;
     if (as && r.as !== as) return false;
     if (da && r.data < da) return false;
@@ -4519,7 +4600,7 @@ const REPORT_ISC_THEAD = `<colgroup>
   <col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:9%">
   <col style="width:9%"><col style="width:9%">
 </colgroup><thead><tr>
-  <th>Allievo</th><th>Corso</th><th>Abbonamento</th><th>Tipo</th>
+  <th>Allievo</th><th>Corsi</th><th>Abbonamento</th><th>Tipo</th>
   <th>Iscrizione</th><th>Scadenza</th><th>Pagato</th><th>Data pag.</th>
   <th style="text-align:center">Fatte</th><th style="text-align:center">Rimanenti</th>
 </tr></thead>`;
@@ -4543,7 +4624,7 @@ function reportIscRowHtml(r) {
       <td style="font-weight:500;cursor:pointer;" onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')" title="Apri riepilogo">
         <span style="color:var(--accent);text-decoration:underline;text-underline-offset:3px;">${escHtml(r.allievo)}</span>
       </td>
-      <td>${corsoDisplayHtml(r.corso)}</td>
+      <td>${corsiDisplayHtml(r.corsi)}</td>
       <td style="color:var(--text-muted)">${escHtml(resolveAbbonamentoNome(r)) || dash}</td>
       <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
       <td style="white-space:nowrap;">${fmtDate(r.data)}</td>
@@ -4602,8 +4683,12 @@ function renderReportIscTables(righe) {
   allieviData.forEach(a => { tesseratoMap[a.nomeCompleto] = isTesserato(a.tesseramento); });
   const gruppi = {};
   righe.forEach(r => {
-    const key = raggruppa === 'corso' ? (r.corso || '__none__')
-      : raggruppa === 'abbonamento' ? (resolveAbbonamentoNome(r) || '__none__')
+    if (raggruppa === 'corso') {
+      const corsi = (r.corsi && r.corsi.length) ? r.corsi : ['__none__'];
+      corsi.forEach(c => (gruppi[c] ||= []).push(r));
+      return;
+    }
+    const key = raggruppa === 'abbonamento' ? (resolveAbbonamentoNome(r) || '__none__')
       : raggruppa === 'tipo' ? (r.tipo || '__none__')
       : raggruppa === 'tesseramento' ? (tesseratoMap[r.allievo] ? 'Tesserati' : 'Non tesserati')
       : (isPagato(r.pagato) ? 'Pagate' : 'Da pagare');
@@ -4616,7 +4701,7 @@ function renderReportIscTables(righe) {
     if (b === '__none__') return -1;
     return a.localeCompare(b, 'it', { numeric: true });
   });
-  const etichettaNone = raggruppa === 'corso' ? 'Qualsiasi corso (mix)' : 'Senza tipo';
+  const etichettaNone = raggruppa === 'corso' ? 'Nessun corso' : 'Senza tipo';
 
   wrap.innerHTML = chiavi.map(k => `
     <div class="card" style="margin-bottom:16px;">
@@ -4656,12 +4741,12 @@ function exportReportIscCsv() {
   const righe = reportIscRighe(getReportIscFiltered());
   if (!righe.length) return appAlert('Nessuna iscrizione da esportare.');
   downloadCsv('report_iscrizioni.csv', [
-    'Allievo;Corso;Abbonamento;Tipo;Data iscrizione;Data scadenza;Pagato;Data pagamento;Lezioni fatte;Lezioni rimanenti',
+    'Allievo;Corsi;Abbonamento;Tipo;Data iscrizione;Data scadenza;Pagato;Data pagamento;Lezioni fatte;Lezioni rimanenti',
     ...righe.map(r => {
       const [fatteTxt, rimTxt] = reportIscLezioniTesto(r, '');
       return [
         `"${r.allievo.replace(/"/g,'""')}"`,
-        `"${(r.corso||'Qualsiasi corso (mix)').replace(/"/g,'""')}"`,
+        `"${corsiDisplayText(r.corsi,'Nessun corso').replace(/"/g,'""')}"`,
         `"${(resolveAbbonamentoNome(r)||'').replace(/"/g,'""')}"`,
         r.tipo,
         fmtDate(r.data),
@@ -4680,11 +4765,11 @@ function exportReportIscPdf() {
   openPrintTable(
     'Report iscrizioni',
     `${reportIscPeriodoLabel()} · ${righe.length} iscrizioni · generato il ${fmtDate(new Date().toISOString().slice(0,10))}`,
-    ['Allievo','Corso','Abbonamento','Tipo','Iscrizione','Scadenza','Pagato','Data pag.','Fatte','Rimanenti'],
+    ['Allievo','Corsi','Abbonamento','Tipo','Iscrizione','Scadenza','Pagato','Data pag.','Fatte','Rimanenti'],
     righe.map(r => {
       const [fatteTxt, rimTxt] = reportIscLezioniTesto(r, '—');
       return [
-        r.allievo, r.corso || 'Qualsiasi corso (mix)', resolveAbbonamentoNome(r) || '—', r.tipo,
+        r.allievo, corsiDisplayText(r.corsi,'Nessun corso'), resolveAbbonamentoNome(r) || '—', r.tipo,
         fmtDate(r.data), r.scadenzaCalc ? fmtDate(r.scadenzaCalc) : '—',
         r.tipo==='Prova' ? '—' : (isPagato(r.pagato)?'Sì':'No'),
         (r.tipo!=='Prova' && isPagato(r.pagato) && r.dataPag) ? fmtDate(r.dataPag) : '—',
@@ -5181,9 +5266,6 @@ async function init() {
   $('modalAbbonamentoClose').addEventListener('click', closeAbbonamentoModal);
   $('modalAbbonamentoCancel').addEventListener('click', closeAbbonamentoModal);
   $('modalAbbonamentoSave').addEventListener('click', saveAbbonamento);
-  document.querySelectorAll('#abContenutoGrid .cat-chip').forEach(chip => {
-    chip.addEventListener('click', () => setAbbonamentoContenuto(chip.dataset.contenuto));
-  });
   document.querySelectorAll('#abTipoErogazioneGrid .cat-chip').forEach(chip => {
     chip.addEventListener('click', () => setAbbonamentoTipoErogazione(chip.dataset.erogazione));
   });
@@ -5318,6 +5400,10 @@ async function init() {
 
   $('iAbbonamento').addEventListener('change', () => updateIscrizioneAbbonamentoMode());
   $('iData').addEventListener('change', () => updateIscrizioneAbbonamentoMode());
+  // chiude il pannello "Corsi" cliccando fuori (come una select nativa)
+  document.addEventListener('click', (e) => {
+    if (!$('iCorsiGroup')?.contains(e.target)) toggleIscCorsiPanel(true);
+  });
   $('compensiAnno').addEventListener('change', renderCompensi);
   $('notaAnno').addEventListener('change', renderNotaMensile);
   $('notaMese').addEventListener('change', renderNotaMensile);
@@ -5389,7 +5475,8 @@ Object.assign(window, {
   openEditPresenza, deletePresenza, openPresForDay,
   openPresDayChooser, closePresDayChooser,
   apriRiepilogoAllievo, apriNuovaIscrizionePerAllievo,
-  toggleSelectAll, onPresCheck, removePresExtra,
+  toggleSelectAll, onPresCheck, removePresExtra, togglePresAccordion,
+  toggleIscCorsiPanel,
 });
 
 document.addEventListener('DOMContentLoaded', init);
