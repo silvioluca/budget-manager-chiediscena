@@ -521,7 +521,7 @@ function renderDashDaSaldare() {
         <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;">
           <span style="cursor:pointer;color:var(--accent);text-decoration:underline;text-underline-offset:3px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
             onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')">${escHtml(r.allievo)}</span>
-          <span style="color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${corsiDisplayHtml(r.corsi)} (${escHtml(r.tipo)})</span>
+          <span style="color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${corsiDisplayHtml(r.corsi, r.abbonamento)} (${escHtml(r.tipo)})</span>
           <span style="color:var(--red);font-variant-numeric:tabular-nums;white-space:nowrap;">${r.costo ? fmt(r.costo) : '—'}</span>
         </div>`).join('')}
     </div>`;
@@ -2676,11 +2676,14 @@ const ISCRIZIONI_THEAD = `<colgroup>
 // Corso di un'iscrizione: vuoto per gli abbonamenti "mix" (valgono su qualsiasi corso)
 // Elenco dei corsi di un'iscrizione (selezione multipla): come badge nella UI
 // o come semplice testo (per CSV/PDF, con `vuoto` a piacere per il fallback).
-function corsiDisplayHtml(corsi) {
+// Passando `abbonamento` si mostra "Tutti i corsi" se l'iscrizione li copre tutti.
+function corsiDisplayHtml(corsi, abbonamento) {
   if (!corsi || !corsi.length) return '<span style="color:var(--text-dim);font-style:italic;">Nessun corso</span>';
+  if (iscrizioneHaTuttiICorsi(corsi, abbonamento)) return 'Tutti i corsi';
   return corsi.map(c => escHtml(c)).join(', ');
 }
-function corsiDisplayText(corsi, vuoto) {
+function corsiDisplayText(corsi, vuoto, abbonamento) {
+  if (iscrizioneHaTuttiICorsi(corsi, abbonamento)) return 'Tutti i corsi';
   return (corsi && corsi.length) ? corsi.join(', ') : (vuoto ?? '');
 }
 
@@ -2701,7 +2704,7 @@ function iscrizioneRowHtml(r) {
       <td><span class="badge badge-gold">${escHtml(r.as)}</span></td>
       <td>${fmtDate(r.data)}</td>
       <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
-      <td>${iscrizioneHaTuttiICorsi(r) ? 'Tutti' : corsiDisplayHtml(r.corsi)}</td>
+      <td>${corsiDisplayHtml(r.corsi, r.abbonamento)}</td>
       <td>${isProva ? '<span style="color:var(--text-dim)">—</span>' : fmtDate(r.dataPag)}</td>
       <td>${pagatoCell}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${costoCell}</td>
@@ -2862,10 +2865,10 @@ function populateCorsiChipGridIscrizione(selected) {
 }
 
 // true se l'iscrizione copre tutti i corsi che accettano il suo abbonamento (almeno 2)
-function iscrizioneHaTuttiICorsi(r) {
-  if (!r.corsi || r.corsi.length < 2) return false;
-  const validi = corsiData.filter(c => !r.abbonamento || !c.abbonamenti?.length || c.abbonamenti.includes(r.abbonamento));
-  return validi.length > 1 && validi.every(c => r.corsi.includes(c.nome));
+function iscrizioneHaTuttiICorsi(corsi, abbonamento) {
+  if (!corsi || corsi.length < 2) return false;
+  const validi = corsiData.filter(c => !abbonamento || !c.abbonamenti?.length || c.abbonamenti.includes(abbonamento));
+  return validi.length > 1 && validi.every(c => corsi.includes(c.nome));
 }
 
 // Etichetta del pulsante "select" dei corsi: elenco scelto, o un placeholder.
@@ -2884,6 +2887,8 @@ function toggleIscCorsiPanel(forceClose) {
   panel.style.display = willOpen ? '' : 'none';
   btn.classList.toggle('open', willOpen);
 }
+
+let scadenzaIscPreset = ''; // scadenza salvata da mostrare all'apertura in modifica
 
 // Adatta la modale iscrizione all'abbonamento selezionato: chip pacchetti oppure
 // riquadro informativo con la scadenza (nessuna scelta, la decide l'abbonamento).
@@ -2911,6 +2916,10 @@ function updateIscrizioneAbbonamentoMode() {
     $('iTipoScadenzaLabel').textContent = ab.scadenzaTipo
       ? `${ab.scadenzaTipo}${scad ? ' — scade il ' + fmtDate(scad) : ''}`
       : 'Nessuna durata configurata su questo abbonamento';
+    // data di scadenza modificabile: in apertura modifica si mantiene quella salvata,
+    // altrimenti si propone quella calcolata dall'abbonamento
+    $('iScadenza').value = scadenzaIscPreset || scad || '';
+    scadenzaIscPreset = '';
     $('iPagatoRow').style.display = '';
     $('iCostoGroup').style.display = '';
   } else if (SCAD_TIPI_SET.has($('iTipo').value) || $('iTipo').value === 'Prova') {
@@ -2968,7 +2977,9 @@ function openEditIscrizione(id) {
   populateAbbonamentiSelect(r.abbonamento || '');
   populateCorsiChipGridIscrizione(r.corsi || []);
   toggleIscCorsiPanel(true);
+  scadenzaIscPreset = r.scadenza || '';
   updateIscrizioneAbbonamentoMode();
+  scadenzaIscPreset = '';
   // azione "una tantum": non è un dato salvato sull'iscrizione, si riparte scollegata
   $('iTesseraAllievo').checked = false;
   $('iTesseramentoScad').value = '';
@@ -3072,7 +3083,7 @@ async function saveIscrizione() {
   // abbonamenti "a scadenza": nessun conteggio lezioni, solo la data di scadenza
   // (la prova non ha mai scadenza, indipendentemente dall'erogazione dell'abbonamento "Prova")
   const scadenza = tipo !== 'Prova' && abbonamentoObj && abbonamentoObj.tipoErogazione === 'scadenza'
-    ? calcolaScadenzaIscrizione(abbonamentoObj, data) : '';
+    ? ($('iScadenza').value || calcolaScadenzaIscrizione(abbonamentoObj, data)) : '';
 
   const docData = { allievo, as, data, tipo, abbonamento, corsi, dataPag: tipo === 'Prova' ? '' : dataPag, pagato: tipo === 'Prova' ? 'No' : pagato, costo, note, scadenza };
 
@@ -4239,7 +4250,7 @@ function renderRiepilogoAllievo(nomeCompleto) {
               return `<tr>
                 <td style="color:var(--text-muted)">${escHtml(r.as)}</td>
                 <td style="color:var(--text-muted)">${fmtDate(r.data)}</td>
-                <td style="font-weight:500">${corsiDisplayHtml(r.corsi)}</td>
+                <td style="font-weight:500">${corsiDisplayHtml(r.corsi, r.abbonamento)}</td>
                 <td><span style="background:var(--accent-dim);border:1px solid rgba(201,169,110,0.2);color:var(--accent);padding:2px 8px;border-radius:99px;font-size:11px;">${escHtml(r.tipo)}</span></td>
                 <td>${isProva ? '<span style="color:var(--text-dim)">—</span>' : `
                   <span class="badge ${pagatoOk ? 'badge-green' : 'badge-red'}">${pagatoOk ? 'Sì' : 'No'}</span>
@@ -4651,7 +4662,7 @@ function reportIscRowHtml(r) {
       <td style="font-weight:500;cursor:pointer;" onclick="apriRiepilogoAllievo('${escHtml(r.allievo).replace(/'/g,"&#39;")}')" title="Apri riepilogo">
         <span style="color:var(--accent);text-decoration:underline;text-underline-offset:3px;">${escHtml(r.allievo)}</span>
       </td>
-      <td>${corsiDisplayHtml(r.corsi)}</td>
+      <td>${corsiDisplayHtml(r.corsi, r.abbonamento)}</td>
       <td style="color:var(--text-muted)">${escHtml(resolveAbbonamentoNome(r)) || dash}</td>
       <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
       <td style="white-space:nowrap;">${fmtDate(r.data)}</td>
@@ -4773,7 +4784,7 @@ function exportReportIscCsv() {
       const [fatteTxt, rimTxt] = reportIscLezioniTesto(r, '');
       return [
         `"${r.allievo.replace(/"/g,'""')}"`,
-        `"${corsiDisplayText(r.corsi,'Nessun corso').replace(/"/g,'""')}"`,
+        `"${corsiDisplayText(r.corsi,'Nessun corso',r.abbonamento).replace(/"/g,'""')}"`,
         `"${(resolveAbbonamentoNome(r)||'').replace(/"/g,'""')}"`,
         r.tipo,
         fmtDate(r.data),
@@ -4796,7 +4807,7 @@ function exportReportIscPdf() {
     righe.map(r => {
       const [fatteTxt, rimTxt] = reportIscLezioniTesto(r, '—');
       return [
-        r.allievo, corsiDisplayText(r.corsi,'Nessun corso'), resolveAbbonamentoNome(r) || '—', r.tipo,
+        r.allievo, corsiDisplayText(r.corsi,'Nessun corso',r.abbonamento), resolveAbbonamentoNome(r) || '—', r.tipo,
         fmtDate(r.data), r.scadenzaCalc ? fmtDate(r.scadenzaCalc) : '—',
         r.tipo==='Prova' ? '—' : (isPagato(r.pagato)?'Sì':'No'),
         (r.tipo!=='Prova' && isPagato(r.pagato) && r.dataPag) ? fmtDate(r.dataPag) : '—',
