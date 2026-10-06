@@ -2701,7 +2701,7 @@ function iscrizioneRowHtml(r) {
       <td><span class="badge badge-gold">${escHtml(r.as)}</span></td>
       <td>${fmtDate(r.data)}</td>
       <td><span style="${tStyle}">${escHtml(r.tipo)}</span></td>
-      <td>${corsiDisplayHtml(r.corsi)}</td>
+      <td>${iscrizioneHaTuttiICorsi(r) ? 'Tutti' : corsiDisplayHtml(r.corsi)}</td>
       <td>${isProva ? '<span style="color:var(--text-dim)">—</span>' : fmtDate(r.dataPag)}</td>
       <td>${pagatoCell}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${costoCell}</td>
@@ -2742,6 +2742,7 @@ function renderIscrizioniTables(filtered) {
       return;
     }
     const key = raggruppa === 'tipo' ? (r.tipo || '__none__')
+      : raggruppa === 'abbonamento' ? (r.abbonamento || '__none__')
       : (tesseratoMap[r.allievo] ? 'Tesserati' : 'Non tesserati');
     (gruppi[key] ||= []).push(r);
   });
@@ -2751,7 +2752,7 @@ function renderIscrizioniTables(filtered) {
     if (b === '__none__') return -1;
     return a.localeCompare(b, 'it', { numeric: true });
   });
-  const etichettaNone = raggruppa === 'corso' ? 'Nessun corso' : 'Senza tipo';
+  const etichettaNone = raggruppa === 'corso' ? 'Nessun corso' : raggruppa === 'abbonamento' ? 'Senza abbonamento' : 'Senza tipo';
 
   wrap.innerHTML = chiavi.map(k => `
     <div class="card" style="margin-bottom:16px;">
@@ -2823,7 +2824,12 @@ function populateCorsiChipGridIscrizione(selected) {
     }
   });
   const selSet = new Set(daMantenere.filter(nome => corsiValidi.some(c => c.nome === nome)));
-  panel.innerHTML = corsiValidi.length ? corsiValidi.map(c =>
+  const tuttiSel = corsiValidi.length > 0 && corsiValidi.every(c => selSet.has(c.nome));
+  const selezionaTutti = corsiValidi.length > 1 ? `<label class="pres-check-item${tuttiSel ? ' checked' : ''}" id="iCorsiSelectAll">
+      <input type="checkbox" ${tuttiSel ? 'checked' : ''}>
+      <span class="pres-check-name" style="font-weight:600;">Seleziona tutti i corsi</span>
+    </label>` : '';
+  panel.innerHTML = corsiValidi.length ? selezionaTutti + corsiValidi.map(c =>
     `<label class="pres-check-item${selSet.has(c.nome) ? ' checked' : ''}" data-corsonome="${escHtml(c.nome)}">
       <input type="checkbox" ${selSet.has(c.nome) ? 'checked' : ''}>
       <span class="pres-check-name">${escHtml(c.nome)}</span>
@@ -2831,14 +2837,35 @@ function populateCorsiChipGridIscrizione(selected) {
   ).join('') : '<div style="color:var(--text-dim);font-size:12px;padding:8px;">Nessun corso disponibile per questo abbonamento</div>';
   $('iCorsi').value = JSON.stringify([...selSet]);
   updateIscCorsiSelectLabel([...selSet]);
-  panel.querySelectorAll('.pres-check-item').forEach(item => {
-    item.querySelector('input[type=checkbox]').addEventListener('change', (e) => {
+  const items = [...panel.querySelectorAll('.pres-check-item[data-corsonome]')];
+  const allItem = $('iCorsiSelectAll');
+  const aggiorna = () => {
+    const scelti = items.filter(i => i.querySelector('input').checked).map(i => i.dataset.corsonome);
+    $('iCorsi').value = JSON.stringify(scelti);
+    updateIscCorsiSelectLabel(scelti);
+    if (allItem) {
+      const tutti = scelti.length === items.length;
+      allItem.querySelector('input').checked = tutti;
+      allItem.classList.toggle('checked', tutti);
+    }
+  };
+  items.forEach(item => {
+    item.querySelector('input').addEventListener('change', (e) => {
       item.classList.toggle('checked', e.target.checked);
-      const scelti = [...panel.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.closest('.pres-check-item').dataset.corsonome);
-      $('iCorsi').value = JSON.stringify(scelti);
-      updateIscCorsiSelectLabel(scelti);
+      aggiorna();
     });
   });
+  if (allItem) allItem.querySelector('input').addEventListener('change', (e) => {
+    items.forEach(i => { i.querySelector('input').checked = e.target.checked; i.classList.toggle('checked', e.target.checked); });
+    aggiorna();
+  });
+}
+
+// true se l'iscrizione copre tutti i corsi che accettano il suo abbonamento (almeno 2)
+function iscrizioneHaTuttiICorsi(r) {
+  if (!r.corsi || r.corsi.length < 2) return false;
+  const validi = corsiData.filter(c => !r.abbonamento || !c.abbonamenti?.length || c.abbonamenti.includes(r.abbonamento));
+  return validi.length > 1 && validi.every(c => r.corsi.includes(c.nome));
 }
 
 // Etichetta del pulsante "select" dei corsi: elenco scelto, o un placeholder.
